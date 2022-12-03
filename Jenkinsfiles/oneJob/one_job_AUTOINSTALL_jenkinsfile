@@ -1,0 +1,145 @@
+library 'reference-pipeline'
+library 'generic-reference-pipeline'
+
+pipeline {
+    agent any
+  
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '100'))
+    }
+
+    // add bundle vs auto install logic
+    environment {
+        def DEST = "$params.DESTINATION"
+        def APPLICATION_NAME = ""
+    }
+
+    stages {
+		
+		stage('Checkout for UI_GIT_BRANCH Parameter') {
+			steps {
+                dir("${WORKSPACE}") {
+                    checkout([$class: 'GitSCM', branches: [[name: "${params.UI_GIT_BRANCH}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'MyKey', url: "git@github.com:Kyle-Sch/Kyle-Sch.git"]]])
+                }
+                cleanWs()
+            }
+		}
+
+        stage('Backend Java App Deployment') {
+            parallel {
+                stage('CLS') {
+                    when {
+                        not {
+                            equals expected: "NO", actual: params.CLS
+                        }
+                    }   
+                    steps {
+                        script {
+                            changeXmls("clsserver_deployment", "ClsSrvr", "Set1", ":/opt/local/bin/stage/cls", "ONE_JOB_AUTOINSTALL", "${DEST}", "APP1")
+                        }
+                        build job: params.CLS, parameters: [
+                            string(name: 'MAKE', value: params.MAKE), 
+                            string(name: 'DEPLOY', value: params.DEPLOY), 
+                            string(name: 'DESTINATION', value: "${DEST}"),
+                            string(name: 'XMLBRANCH',  value: "ONE_JOB_AUTOINSTALL")
+                        ]
+                    }
+                }
+                
+                stage('DEPLOY AIR - beginning of Mobile backend Apps') {
+                    when {
+                        not{
+                            equals expected: "NO", actual: params.DEPLOY_AIR
+                        }
+                    }
+                    steps {
+                        script {
+                            changeXmls("AIRservice_deployment", "AIRservice", "S\${project.version}Set", "/opt/local/bin/stage/AIR/", "ONE_JOB_AUTOINSTALL", "${DEST}", "APP3")
+                        }
+                        build job: params.DEPLOY_AIR, parameters: [
+                            string(name: 'DESTINATION', value: "${DEST}"),
+                            gitParameter(name: 'XMLBRANCH',  value: "ONE_JOB_AUTOINSTALL")
+                        ]
+                    }
+                }
+
+                stage('DEPLOY ui') {
+                    when {
+                        not {
+                            equals expected: "NO", actual: params.DEPLOY_ui
+                        }
+                    }
+                    steps {
+                        script {
+                            changeXmls("ui", "sort-ui", "\${project.version}-Set", "://opt/local/bin/stage/", "${params.ui_GIT_BRANCH}" , "${DEST}", "APP1")
+                        }
+                        build job: params.DEPLOY_ui, parameters: [
+                            string(name: 'BUILD_TYPE', value: params.ui_BUILD_TYPE), 
+                            string(name: 'VERSION', value: params.ui_VERSION), 
+                            string(name: 'TARGET', value: "${DEST}"),
+                            gitParameter(name: 'XMLBRANCH',  value: "ONE_JOB_AUTOINSTALL")
+                        ]
+                    }
+                }
+                
+                stage('DEPLOY_UIORCH') {
+                    when {
+                        not {
+                            equals expected: "NO", actual: params.DEPLOY_UIORCH
+                        }
+                    }
+                    steps {
+						script {
+                            changeXmls("uiorchestrator_deployment", "uiOrchestrator", "S\${project.version}Set", "//opt/local/bin/stage/uiorch/", "ONE_JOB_AUTOINSTALL", "${DEST}", "APP1")
+                        }
+
+                        build job: params.DEPLOY_UIORCH, parameters: [
+                            string(name: 'DESTINATION', value: "${DEST}"),
+                            gitParameter(name: 'XMLBRANCH',  value: "ONE_JOB_AUTOINSTALL")
+                        ]
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
+
+void changeXmls(String deployURL, String xmlPrefix, String setID, String stageDir, String gitBranch, String xmlDEST, String eaiNum){
+    script {
+        sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+            withCredentials([usernamePassword(credentialsId: 'jenkinsKey', usernameVariable: 'GIT_USERNAME', passwordVariable: 'PASSWORD')]) {
+                sh """
+                    git clone "https://${GIT_USERNAME}:${PASSWORD}@github.com/${eaiNum}/${deployURL}.git" 
+                    ls -ltr
+                    cd ${deployURL}
+                    git checkout ${gitBranch}
+                    ls -ltr 
+                    sed -i "/<destination id/d" ${xmlPrefix}-${xmlDEST}-deployment.xml
+                """
+            }
+            for (String server : params.SERVERS.split("\n")) {
+                sh """
+                    cd ${deployURL} 2>/dev/null
+                    sed -i '7 i <destination id=\"DEST\" hostAndDirectory=\"DEST${stageDir}\" setId=\"${setID}\"></destination>' ${xmlPrefix}-${xmlDEST}-deployment.xml
+                    sed -i 's|DEST|${server}${DOMAIN}|g' ${xmlPrefix}-${xmlDEST}-deployment.xml
+                """
+            }
+            withCredentials([usernamePassword(credentialsId: 'jenkinsKey', usernameVariable: 'GIT_USERNAME', passwordVariable: 'PASSWORD')]) {
+                sh """
+                    ls -ltr
+                    cd ${deployURL}
+                    sed -i 's|-m .|-m ${LEVEL}|' ${xmlPrefix}-${xmlDEST}-deployment.xml
+                    cat ${xmlPrefix}-${xmlDEST}-deployment.xml
+                    git add -A
+                    git diff --staged --quiet || git commit -m "Pushed Repo setup files to branches on \$(date)"
+                    git push "https://${GIT_USERNAME}:${PASSWORD}@github.com/${eaiNum}/${deployURL}.git" --all 2>/dev/null
+                """
+            }
+        }
+    }
+}

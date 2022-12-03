@@ -1,0 +1,329 @@
+node('!ent-pgh-weblogic && !swak_rhel8 && !FXG-SCM-AIX') {
+
+    library 'reference-pipeline'
+    library 'fxg-reference-pipeline'
+
+    String VERSION = ""
+
+    //TODO - Cry a little bit
+    //TODO - Necessary Stages:
+    //Settings.xml checkout/stash
+    //Source Code checkout/stash
+    //Install Scripts
+    //unstash everything to D6, Build tar/stash
+    //Unstash/upload tar to nexus
+    //Download snapshot tar from nexus
+    //Upload release cut tar to nexus
+    //Download release cut tar from nexus
+    //Obtain SCM permission
+    //Deploy
+    //TODO - Arguments we need:
+    //Is an SVN argument a thing? - regardless, checkout from trunk/tag?
+    //Install Script branch to pull from
+    //Version
+    //MAKE snapshot/release/nothing
+    //DEPLOY snapshot/release/nothing
+    //DESTINATION prd/qas/dev
+
+    try {
+        stage('Checkout for C PROJECT_BRANCH Parameter') {
+            checkout([$class: 'GitSCM', branches: [[name: "origin/EMPTY_DO_NOT_DELETE"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins_gitlab', url: "git@gitlab.prod.fedex.com:APP1085/iss-main.git"]]])
+            cleanWs()
+        }
+
+        stage("Checkout/Stash Maven Settings") {
+            checkout scm: [$class: 'GitSCM', branches: [[name: "origin/master"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins_gitlab', url: 'git@gitlab.prod.fedex.com:APP1085/universal-pipelines.git']]]
+            stash includes: 'settings.xml', name: 'settings'
+            cleanWs()
+        }
+
+        stage ('Checkout and Stash Deployment XMLs') {
+            checkout([$class: 'GitSCM', branches: [[name: "$DEPLOYMENT_XML_BRANCH"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins_gitlab', url: "git@gitlab.prod.fedex.com:APP1085/iss-deployment.git"]]])
+            stash includes: '**-deployment.xml', name: 'deploymentXMLs'
+            cleanWs()
+        }
+
+        stage("Checkout/Stash Source Code") {
+            // checkout([$class: 'SubversionSCM', additionalCredentials: [], excludedCommitMessages: '', excludedRegions: '', excludedRevprop: '', excludedUsers: '', filterChangelog: false, ignoreDirPropChanges: false, includedRegions: '', locations: [[cancelProcessOnExternalsFail: true, credentialsId: 'jenkinsSCM', depthOption: 'infinity', ignoreExternalsOption: true, local: '.', remote: "https://conexus.prod.fedex.com:9443/subversion/grd_isstech/ISS/${SUBVERSION_TAG}/OASIS"]], quietOperation: true, workspaceUpdater: [$class: 'UpdateUpdater']])
+            checkout([$class: 'GitSCM', branches: [[name: "${params.PROJECT_BRANCH}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins_gitlab', url: "git@gitlab.prod.fedex.com:APP1085/iss-main.git"]]])
+            stash name: 'source'
+            sh "ls -ltr; pwd"
+            dir("mavenPackaging") {
+                VERSION = readMavenPom().getVersion()
+            }
+            cleanWs()
+        }
+
+        stage("Checkout/Stash Install Scripts") {
+            if (params.BUILD == "SNAPSHOT" || params.DEPLOY != "NOTHING") {
+                checkout scm: [$class: 'GitSCM', branches: [[name: "${INSTALL_SCRIPTS_SOURCE}"]], doGenerateSubmoduleConfigurations: false, extensions: [], submoduleCfg: [], userRemoteConfigs: [[credentialsId: 'jenkins_gitlab', url: 'git@gitlab.prod.fedex.com:APP1085/iss-installationscripts.git']]]
+                stash name: 'install_scripts'
+                cleanWs()
+            } else {
+                echo "Skipping stage because BUILD != SNAPSHOT"
+            }
+        }
+
+        stage("Build Tar AIX") {
+            if (params.BUILD == "SNAPSHOT" && (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH")) {
+                node('FXG-SCM-AIX') {
+                    cleanWs()
+                    try {
+                        unstash 'source'
+                        unstash 'settings'
+                        dir("Deploy_Scripts") {
+                            unstash 'install_scripts'
+                        }
+                        dir("${SERVER_SIDE_FROM_POMS_TO_USE}") {
+                            sh "ls -ltr;chmod 755 *"
+                        }
+                        sh """
+                            echo \$PATH
+                            export ORACLE_HOME=/opt/oracle/product/${COMPILE_WITH_ORACLE_VERSION}
+                            PATH=\$PATH:\$ORACLE_HOME/bin
+                            export PATH
+                            uname
+                            ls -ltr
+                            mkdir -p clients/tmp || echo "clients/tmp already exists"
+                            mvn -s settings.xml package -P=aix,DEV
+                        """
+                        dir("mavenPackaging/target") {
+                            stash includes: "**.tar", name: "aix-tar"
+                        }
+                    } finally {
+                        cleanWs()
+                    }
+                }
+            } else {
+                echo "Skipping stage because not building AIX snapshot"
+            }
+        }
+        
+        stage("Build Tar Linux") {
+            if (params.BUILD == "SNAPSHOT" && (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH")) {
+                // node('10290') {
+                node('docker') {
+                    cleanWs()
+                    try {
+                        withMaven(jdk: 'JAVA_8', maven: 'Maven 3.3.9') {
+                            unstash 'source'
+                            unstash 'settings'
+                            dir("Deploy_Scripts") {
+                                unstash 'install_scripts'
+                            }
+                            sh "ls -ltr"
+                            dir("${SERVER_SIDE_FROM_POMS_TO_USE}") {
+                                sh "ls -ltr;touch test.txt; chmod 755 *"
+                            }
+                            sh """
+                                echo \$PATH
+                                export ORACLE_HOME=/opt/oracle/client/product/${COMPILE_WITH_ORACLE_VERSION}
+                                PATH=\$PATH:\$ORACLE_HOME/bin
+                                export PATH
+                                make --version
+                                uname
+                                which cc
+                                hostnamectl
+                                ls -ltr /opt/oracle/client/product/
+                                ls -ltr
+                                mkdir -p clients/tmp || echo "clients/tmp already exists"
+                                ls -ltr
+                                mvn -s settings.xml package -P=linux,DEV
+                                ls -ltr Server_Side_Merge_New/
+                                ls -ltr
+                                cd mavenPackaging
+                            """
+                            dir("mavenPackaging/target") {
+                                sh "ls -ltr"
+                                stash includes: "**.tar", name: "linux-tar"
+                            }
+                        }
+                    } finally {
+                        cleanWs()
+                    }
+                }
+            } else {
+                echo "Skipping stage beacuse BUILD != SNAPSHOT"
+            }
+        }
+
+        stage("Upload Snapshots of Tar") {
+            if (params.BUILD == "SNAPSHOT") {
+                withMaven(jdk: 'JAVA_8', maven: 'Maven 3.3.9') {
+                    unstash "source"
+                    unstash "settings"
+                    if (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH") {
+                        unstash "aix-tar"
+                        sh "ls -ltr"
+                        sh "cd mavenPackaging; ls -ltr;"
+                        sh "mvn deploy:deploy-file \
+                        -s ${WORKSPACE}/settings.xml \
+                        -DrepositoryId=fxg-snapshots \
+                        -DgroupId=${APP_GROUP_ID} \
+                        -DartifactId=${AIX_APP_NAME} \
+                        -Dversion=${VERSION}-SNAPSHOT \
+                        -Dpackaging=tar \
+                        -DgeneratePom=true \
+                        -Dfile=ISS-${VERSION}.tar \
+                        -Durl=${NEXUS_SNAPSHOT_URL}"
+                        sh "rm *.tar"
+                    }
+                    if (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH") {
+                        unstash "linux-tar"
+                        sh "ls -ltr"
+                        sh "cd mavenPackaging; ls -ltr;"
+                        sh "mvn deploy:deploy-file \
+                        -s ${WORKSPACE}/settings.xml \
+                        -DrepositoryId=fxg-snapshots \
+                        -DgroupId=${APP_GROUP_ID} \
+                        -DartifactId=${LINUX_APP_NAME} \
+                        -Dversion=${VERSION}-SNAPSHOT \
+                        -Dpackaging=tar \
+                        -DgeneratePom=true \
+                        -Dfile=ISS-${VERSION}.tar \
+                        -Durl=${NEXUS_SNAPSHOT_URL}"
+                    }
+                    cleanWs()
+                }
+            } else {
+                echo "Skipping stage because BUILD != SNAPSHOT"
+            }
+        }
+
+        stage("Download Snapshot of Tar") {
+            if (params.DEPLOY == "SNAPSHOT" || params.BUILD == "RELEASE") {
+                unstash 'source'
+                unstash 'settings'
+                if (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH") {
+                    downloadNexusArtifact groupId: "${APP_GROUP_ID}",
+                            artifactId: "${AIX_APP_NAME}",
+                            repo: "fxg-snapshots",
+                            release: false,
+                            version: "${VERSION}-SNAPSHOT",
+                            extension: "tar"
+                    stash includes: "**.tar", name: "aix-tar"
+                    sh "rm *.tar"
+                }
+                if (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH") {
+                    downloadNexusArtifact groupId: "${APP_GROUP_ID}",
+                            artifactId: "${LINUX_APP_NAME}",
+                            repo: "fxg-snapshots",
+                            release: false,
+                            version: "${VERSION}-SNAPSHOT",
+                            extension: "tar"
+                    stash includes: "**.tar", name: "linux-tar"
+                }
+                cleanWs()
+            } else {
+                echo "Skipping stage because not deploying anything and not making release cut"
+            }
+        }
+
+        stage("Upload ReleaseCut Tar") {
+            if (params.BUILD == "RELEASE") {
+                withMaven(jdk: 'JAVA_8', maven: 'Maven 3.3.9') {
+                    unstash "source"
+                    unstash "settings"
+                    if (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH") {
+                        unstash "aix-tar"
+                        sh "mvn deploy:deploy-file \
+                        -s ${WORKSPACE}/settings.xml \
+                        -DrepositoryId=fxg-releases \
+                        -DgroupId=${APP_GROUP_ID} \
+                        -DartifactId=${AIX_APP_NAME} \
+                        -Dversion=${VERSION} \
+                        -Dpackaging=tar \
+                        -DgeneratePom=true \
+                        -Dfile=${AIX_APP_NAME}-${VERSION}-SNAPSHOT.tar \
+                        -Durl=${NEXUS_RELEASE_URL}"
+                    }
+                    if (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH") {
+                        unstash "linux-tar"
+                        sh "mvn deploy:deploy-file \
+                        -s ${WORKSPACE}/settings.xml \
+                        -DrepositoryId=fxg-releases \
+                        -DgroupId=${APP_GROUP_ID} \
+                        -DartifactId=${LINUX_APP_NAME} \
+                        -Dversion=${VERSION} \
+                        -Dpackaging=tar \
+                        -DgeneratePom=true \
+                        -Dfile=${LINUX_APP_NAME}-${VERSION}-SNAPSHOT.tar \
+                        -Durl=${NEXUS_RELEASE_URL}"
+                    }
+                }
+                cleanWs()
+            } else {
+                echo "Skipping stage because not building a release cut"
+            }
+        }
+
+        stage("Download ReleaseCut Tar") {
+            if (params.DEPLOY == "RELEASE") {
+                unstash 'source'
+                unstash 'settings'
+                if (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH") {
+                    downloadNexusArtifact groupId: "${APP_GROUP_ID}",
+                            artifactId: "${AIX_APP_NAME}",
+                            repo: "fxg-releases",
+                            release: true,
+                            version: "${VERSION}",
+                            extension: "tar"
+                    stash includes: "**.tar", name: "aix-tar"
+                }
+                if (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH") {
+                    downloadNexusArtifact groupId: "${APP_GROUP_ID}",
+                            artifactId: "${LINUX_APP_NAME}",
+                            repo: "fxg-releases",
+                            release: true,
+                            version: "${VERSION}",
+                            extension: "tar"
+                    stash includes: "**.tar", name: "linux-tar"
+                }
+                cleanWs()
+            } else {
+                echo "Skipping stage because not deploying a release cut"
+            }
+        }
+
+        stage('Get DIY Permission to Push to Prod') {
+            if (params.DEPLOY != "NOTHING" && params.DESTINATION == "PRD") {
+                notification train: 'uss'
+            } else {
+                echo "Skipping because not deploying to production"
+            }
+        }
+
+        stage("Deploy Binary") {
+            if (params.DEPLOY != "NOTHING" && params.DESTINATION != "NOWHERE") {
+                unstash 'source'
+                dir("xmldir") {
+                    unstash 'deploymentXMLs'
+                }
+                withMaven(jdk: 'JAVA_8', maven: 'Maven 3.3.9') {
+                    sshagent(credentials: ['DIY_SystemTeam_Master_SSH_Key']) {
+                        dir("mavenPackaging") {
+                            if (params.RUN_FOR_OS == "AIX" || params.RUN_FOR_OS == "BOTH") {
+                                unstash 'aix-tar'
+                                if (params.DEPLOY == "SNAPSHOT") {
+                                    sh "mv iss-main-aix**.tar iss-main-aix-${VERSION}.tar"
+                                }
+                            }
+                            if (params.RUN_FOR_OS == "LINUX" || params.RUN_FOR_OS == "BOTH") {
+                                unstash 'linux-tar'
+                                if (params.DEPLOY == "SNAPSHOT") {
+                                    sh "mv iss-main-linux**.tar iss-main-linux-${VERSION}.tar"
+                                }
+                            }
+                            unstash 'install_scripts'
+                            unstash 'settings'
+                            sh "ls -ltr"
+                            sh "mvn scm.plugins:scm-archive-deployment:distribute -U -P=${params.DESTINATION} -s settings.xml"
+                        }
+                    }
+                }
+            }
+        }
+
+
+    } finally { cleanWs() }
+}
