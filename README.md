@@ -1,0 +1,3 @@
+- 👋 Hi, I’m Kyle Schneiderlochner @Kyle-Sch
+- 👀 I’m interested in Learning as much as I can about DevOps and automation.
+- 🌱 I’m currently learning Python.
