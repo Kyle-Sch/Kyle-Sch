@@ -40,3 +40,11 @@ Collections
         - you can sort permanently and temporarily
     - Check length using len method
     - -1 index is always last item
+
+Loops
+- for in each loop
+- indents are what to do in the loop
+- colon is important
+- range() for numbers
+    - Ends before end range number
+- 
