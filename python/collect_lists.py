@@ -47,3 +47,8 @@ len(motorcyles) # length
 
 print(motorcyles[-1]) # last value
 
+# Split
+players = ["kyle", "mike", "corey"]
+print(players[0:2])
+print(players[:2])
+print(players[-1:]) # digits from the end

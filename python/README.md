@@ -6,6 +6,8 @@ How to check the version
 
 General
  - no semi colon to end a line
+ - 4 spaces per indent
+ - line length 80 or less
 
 Variables
  - variables are labels
@@ -40,6 +42,10 @@ Collections
         - you can sort permanently and temporarily
     - Check length using len method
     - -1 index is always last item
+    - min, max, and sum functions
+- Tuple
+    - unchangable list
+
 
 Loops
 - for in each loop

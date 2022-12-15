@@ -1,0 +1,6 @@
+- sudo apt install <package>
+    - Aptitude
+- RPM
+    - yum
+    - DNF
+- Make sure you install packages that have been cleared by secutirty and that are being required by the dev team
