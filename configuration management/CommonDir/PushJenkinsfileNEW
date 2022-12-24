@@ -1,0 +1,664 @@
+#!groovy
+library 'fxg-reference-pipeline'
+library 'reference-pipeline'
+
+pipeline {
+    agent { label 'Tomcat||Weblogic' }
+    // agent any
+    // agent { label 'pje22698' }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '100'))
+    }
+
+    environment {
+        def GIT_BRANCH = "${params.BRANCH_SELECT}"
+        def BRANCH_NUM = "${params.BRANCH_NUM}"
+        def osSystem = "${params.osSystem}" 
+        def DOMAIN = "${params.DOMAIN}"
+        def AS400 = "${params.AS400}" 
+        def SITE_ID = "${params.SITE_ID}"
+        def ALT_ID = "${params.ALT_ID}"
+        def LCITY_NUM = "${params.LCITY_NUM}"
+        def HD_ID = "${params.HD_ID}"
+        def SORT_FLAG = "${params.SORT_FLAG}"
+        def BAG_SORT = "${params.BAG_SORT}" 
+        def MULTI_SEC = "${params.MULTI_SEC}"
+        def TNS_NAME = "${params.TNS_NAME}" 
+        def TIMEZONE = "${params.TIMEZONE}"
+        def COUNTRY_CODE = "${params.COUNTRY_CODE}"
+        def DO_PRELOAD = "${params.DO_PRELOAD}"
+        def TARGET_DISTRO = "${params.TARGET_DISTRO}" 
+        def MACH_NUM_TARGET = "${params.MACH_NUM_TARGET}"
+        def ENV_TARGET = "${params.ENV_TARGET}" 
+        def IP_ADDRESS = "${params.IP_ADDRESS}"
+		def OTHER_SERVER = "${params.OTHER_SERVER}"
+		def SECOND_MACH_IP = "${params.SECOND_MACH_IP}"
+    }
+
+    stages {
+
+        stage("Setup /tmp/commonDir, critical directories, and default files on the destination server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            DEFAULT_COMMON="\${tempPath}/default/common"
+                            DEFAULT_CRONTAB="\${tempPath}/default/crontab"
+                            DEFAULT_USERS="\${tempPath}/default/users"
+                            DIR_SETUP_LOG_LOC="/home/oasis/COMMISSION/verify/dirSETUP.log"
+                            if [[ ! "\$DEFAULT_COMMON" == "/tmp/commonDir/default/common" ]] ; then
+                                exit
+                            fi
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                            
+                            if ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "ls /tmp | grep -q 'commonDir' " ; then
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "rm -rf \$tempPath"
+                            fi
+                            
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                mkdir -p \$tempPath/common ;
+                                mkdir -p \$tempPath/backupCommon ;
+                                mkdir -p \$tempPath/crontab ;
+                                mkdir -p \$tempPath/users/oasis ;
+                                mkdir -p \$tempPath/users/user1 ;
+                                mkdir -p \$tempPath/users/user2 ;
+                                mkdir -p \$tempPath/users/ssh ;
+                                mkdir -p \$tempPath/users/backup/user2 ;
+                                mkdir -p \$tempPath/users/backup/oasis ;
+                                mkdir -p \$tempPath/users/backup/user1 ;
+                                mkdir -p \$tempPath/users/backup/ssh ;
+                                mkdir -p \$tempPath/verify ;
+                                mkdir -p \$DEFAULT_COMMON ;
+                                mkdir -p \$DEFAULT_CRONTAB ;
+                                mkdir -p \$DEFAULT_USERS/oasis ;
+                                mkdir -p \$DEFAULT_USERS/user1 ;
+                                mkdir -p \$DEFAULT_USERS/user2 ;
+                                mkdir -p \$DEFAULT_USERS/ssh ;
+                                chmod 755 /home/oasis ;
+                                mkdir -p /home/oasis/COMMISSION/verify ;
+                                touch /var/company/APP/logs/EVENT_LOG ; 
+                                chmod 664 /var/company/APP/logs/EVENT_LOG
+                            "
+
+                            ls -ltr
+                            
+                            DIRS=\$(cat dirListPerm777.txt) ;
+                            for dir in \$DIRS
+                            do
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                    if [[ -e \$dir ]]; then 
+                                        echo 'ERROR \$dir already existed ' >> \$DIR_SETUP_LOG_LOC ; 
+                                    else 
+                                        mkdir -p \$dir ; chgrp oasis \$dir ; chmod 777 \$dir ; chmod g+s \$dir ; 
+                                        echo 'Dir \$dir was created and permissions were set.' >> \$DIR_SETUP_LOG_LOC ; 
+                                    fi
+                                "
+                            done
+
+                            FILES=\$(cat emptyFileList.txt) ;
+                            for file in \$FILES
+                            do
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                    if [[ -e \$file ]]; then 
+                                        echo 'ERORR \$file already existed ' >> \$DIR_SETUP_LOG_LOC ; 
+                                    else 
+                                        touch \$file ; chmod 666 \$file ;
+                                        echo 'File \$file was created and permissions were set.' >> \$DIR_SETUP_LOG_LOC ; 
+                                    fi
+                                "
+                            done
+                        """
+                    }
+                }
+            }
+        }
+        stage("Verify default server setup on the destination server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                            VER_SERVER_LOG_LOC="/home/oasis/COMMISSION/verify/verify_basic_setup.log"
+
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                echo 'Verify Config Report ' > \$VER_SERVER_LOG_LOC ;
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'Verify java8_64(JDK 241) is installed and verify Java (TM) SE Runtime Environment is of date greater than 20130601.\n' >> \$VER_SERVER_LOG_LOC ;
+                                java -version 2>> \$VER_SERVER_LOG_LOC ;
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers using Centralized Database this file will either be commented out or not exist.' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers with on-machine Databases this file will contain the HOST ' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'which will be the machine name and #, the LABEL will be FXGFSDDB, and the SERVICE_NAME will be APPPDB.' >> \$VER_SERVER_LOG_LOC ;
+                                if [[ ! -e /opt/oracle/client/product/19.4.0_64/network/admin/tnsnames.ora ]]; then 
+                                    echo 'ERROR: file /opt/oracle/client/product/19.4.0_64/network/admin/tnsnames.ora is missing ' >> \$VER_SERVER_LOG_LOC 
+                                else 
+                                    cat /opt/oracle/client/product/19.4.0_64/network/admin/tnsnames.ora >> \$VER_SERVER_LOG_LOC 
+                                fi ; 
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers using Centralized Database this file will contain LDAP, TNSNAMES, and EZCONNECT for NAMES.DIRECTORY_PATH.' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers with on-machine Databases this file will either be commented out or not exist.\n' >> \$VER_SERVER_LOG_LOC ;
+                                if [[ ! -e /opt/oracle/client/product/19.4.0_64/network/admin/sqlnet.ora ]]; then 
+                                    echo 'ERROR: file /opt/oracle/client/product/19.4.0_64/network/admin/sqlnet.ora is missing ' >> \$VER_SERVER_LOG_LOC 
+                                else 
+                                    cat /opt/oracle/client/product/19.4.0_64/network/admin/sqlnet.ora >> \$VER_SERVER_LOG_LOC 
+                                fi ;
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers using Centralized Database this file will contain oidprd.gss.ground.fedex.com. '  >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers with on-machine Databases this file will either be commented out or not exist.\n' >> \$VER_SERVER_LOG_LOC ;
+                                if [[ ! -e /opt/oracle/client/product/19.4.0_64/network/admin/ldap.ora ]]; then 
+                                    echo 'ERROR: file /opt/oracle/client/product/19.4.0_64/network/admin/ldap.ora is missing ' >> \$VER_SERVER_LOG_LOC 
+                                else 
+                                    cat /opt/oracle/client/product/19.4.0_64/network/admin/ldap.ora >> \$VER_SERVER_LOG_LOC 
+                                fi ;
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Servers using Centralized Database this file will either be commented out or not exist.' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'For Server with on-machine Databases this file will contain the HOST ' >> \$VER_SERVER_LOG_LOC ;
+                                echo 'which will be the machine name and # and the GLOBAL_DBNAME will be FXGFSDDB. \n' >> \$VER_SERVER_LOG_LOC ;
+                                if [[ ! -e /opt/oracle/client/product/19.4.0_64/network/admin/listener.ora ]]; then 
+                                    echo 'ERROR: file /opt/oracle/client/product/19.4.0_64/network/admin/listener.ora is missing ' >> \$VER_SERVER_LOG_LOC 
+                                else 
+                                    cat /opt/oracle/client/product/19.4.0_64/network/admin/listener.ora >> \$VER_SERVER_LOG_LOC 
+                                fi
+                                echo '----------------------------------' >> \$VER_SERVER_LOG_LOC ; 
+                            "
+                        """
+                    }
+                }
+            }
+        }
+        stage("Deploy the default and site specific common files to tmp on the destination server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                        
+                            if [[ -e APP$BRANCH_NUM ]] ; then
+                                cp -p ./cacheGitAttributes.sh ./APP$BRANCH_NUM/common/cacheGitAttributes.sh
+                                cd APP$BRANCH_NUM/common/
+                                chmod +x ./cacheGitAttributes.sh
+                                ./cacheGitAttributes.sh --apply
+                                rm cacheGitAttributes.sh
+                                cd ../../
+
+                                scp -pro StrictHostKeyChecking=no ./default/common oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./default/users oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./default/crontab oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./APP$BRANCH_NUM/common oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./APP$BRANCH_NUM/users oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./APP$BRANCH_NUM/crontab oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./utilSbuildDBConfig.sh oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./utilSbuildDBConfig.LINUX.sh oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./update_jms_queues.sql oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./CONFG_APPLI_PARM.sql oasis@\$host$DOMAIN:\$tempPath/
+                            
+                            else
+                                cp -p ./cacheGitAttributes.sh ./default/common/cacheGitAttributes.sh
+                                cd ./default/common/
+                                chmod +x ./cacheGitAttributes.sh
+                                ./cacheGitAttributes.sh --apply
+                                rm cacheGitAttributes.sh
+                                cd ../../
+
+                                scp -pro StrictHostKeyChecking=no ./default/common oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./default/users oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./default/crontab oasis@\$host$DOMAIN:\$tempPath/default/
+                                scp -pro StrictHostKeyChecking=no ./utilSbuildDBConfig.sh oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./utilSbuildDBConfig.LINUX.sh oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./update_jms_queues.sql oasis@\$host$DOMAIN:\$tempPath/
+                                scp -pro StrictHostKeyChecking=no ./CONFG_APPLI_PARM.sql oasis@\$host$DOMAIN:\$tempPath/
+                            fi
+
+                        """
+                    }
+                }
+            }
+        }
+        stage("Setup the default config files on the destination server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            DEFAULT_COMMON="\${tempPath}/default/common"
+                            DEFAULT_CRONTAB="\${tempPath}/default/crontab"
+                            DEFAULT_USERS="\${tempPath}/default/users"
+                            
+                            user1_PROFILE_LOC="/home/user1/.profile"
+                            user2_PROFILE_LOC="/home/user2/.profile"
+                            VER_DEFAULT_LOG_LOC="/home/oasis/COMMISSION/verify/defaultFileSetup.log"
+                            VER_SERVER_LOG_LOC="/home/oasis/COMMISSION/verify/verify_basic_setup.log"
+                            DIR_SETUP_LOG_LOC="/home/oasis/COMMISSION/verify/dirSETUP.log"
+                            
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                         
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                sed 's/FXGFSDDB/$TNS_NAME/' \$DEFAULT_USERS/oasis/profile_linux > \$DEFAULT_USERS/oasis/profile_linux.tmp ;
+                                sed 's/TZ=.*/TZ=$TIMEZONE/' \$DEFAULT_USERS/oasis/profile_linux.tmp > \$DEFAULT_USERS/oasis/profile_linux ;
+                                rm -f \$DEFAULT_USERS/oasis/profile_linux.tmp ;
+                                chmod 644 \$DEFAULT_USERS/oasis/profile_linux ;
+                                cp -p \$DEFAULT_USERS/oasis/profile_linux /home/oasis/.profile ;
+                                chmod 744 /home/oasis/.profile ;
+
+                                if [[ -e /home/user1/.profile ]] ; then 
+                                    if grep -q 'TZ=' /home/user1/.profile ; then 
+                                        sed 's/export TZ=.*/export TZ=$TIMEZONE/' /home/user1/.profile > /home/oasis/COMMISSION/user1ProfileCUTOVER ;
+                                        cat /home/oasis/COMMISSION/user1ProfileCUTOVER > /home/user1/.profile ;
+                                    else
+                                        echo 'export TZ=$TIMEZONE' >> /home/user1/.profile ;
+                                    fi ;
+                                else
+                                    echo '/home/user1/profile did not exist already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+
+                                if [[ -e /home/user2/.profile ]] ; then 
+                                    if grep -q 'TZ=' /home/user2/.profile ; then 
+                                        sed 's/export TZ=.*/export TZ=$TIMEZONE/' /home/user2/.profile > /home/oasis/COMMISSION/user2ProfileCUTOVER ;
+                                        cat /home/oasis/COMMISSION/user2ProfileCUTOVER > /home/user2/.profile ;
+                                        cat /home/oasis/COMMISSION/user2ProfileCUTOVER > /home/user2/.profile ;
+                                    else
+                                        echo 'export TZ=$TIMEZONE' >> /home/user2/.profile ;
+                                    fi;
+                                else
+                                    echo '/home/user2/profile did not exist already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+
+                                mv \$DEFAULT_COMMON/PFendSortConfig_LINUX \$DEFAULT_COMMON/PFendSortConfig ;
+                            "
+
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                if [[ ! -e /home/oasis/.show_machine_info ]] ; then 
+                                    sed 's#/prod/sms#/opt/fedex/APP#g' \$DEFAULT_USERS/oasis/show_machine_info > \$DEFAULT_USERS/oasis/show_machine_info.tmp ;
+                                    mv \$DEFAULT_USERS/oasis/show_machine_info.tmp \$DEFAULT_USERS/oasis/show_machine_info ;
+                                    chmod 644 \$DEFAULT_USERS/oasis/show_machine_info ;
+                                    cp -p \$DEFAULT_USERS/oasis/show_machine_info /home/oasis/.show_machine_info ;
+                                    chmod 750 /home/oasis/.show_machine_info ;  
+                                else    
+                                    echo '/home/oasis/show_machine_info exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi;
+                                if [[ ! -e /home/oasis/.netrc ]] ; then 
+                                    echo 'machine \$host login oasis password oasis' > \$DEFAULT_USERS/oasis/netrc ;
+                                    echo 'machine \$host login oasis password oasis' >> \$DEFAULT_USERS/oasis/netrc ;
+                                    chmod 644 \$DEFAULT_USERS/oasis/netrc ;
+                                    cp -p \$DEFAULT_USERS/oasis/netrc /home/oasis/.netrc ;
+                                else
+                                    echo '/home/oasis/netrc exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /home/oasis/.rhosts ]] ; then 
+                                    chmod 644 \$DEFAULT_USERS/oasis/rhosts ;
+                                    cp -p \$DEFAULT_USERS/oasis/rhosts /home/oasis/.rhosts ;
+                                else
+                                    echo '/home/oasis/rhosts exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi;
+    
+                                chmod 644 \$DEFAULT_USERS/ssh/ssh$ENV_TARGET/authorized_keys ;
+                                cp -p \$DEFAULT_USERS/ssh/ssh$ENV_TARGET/authorized_keys /home/oasis/.ssh/ ;
+                                chmod 600 \$DEFAULT_USERS/ssh/ssh$ENV_TARGET/id_rsa ;
+                                cp -p \$DEFAULT_USERS/ssh/ssh$ENV_TARGET/id_rsa /home/oasis/.ssh/ ;
+                                
+                                if [[ ! -e /home/oasis/.ssh/config  ]] ; then 
+                                    chmod 750 \$DEFAULT_USERS/ssh/config ;
+                                    cp -p \$DEFAULT_USERS/ssh/config /home/oasis/.ssh/ ;
+                                else
+                                    echo 'ssh/config exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+
+                                chmod +x /tmp/commonDir/utilSbuildDBConfig.LINUX.sh
+                            
+                                echo ############# ;
+                                echo Crontab ;
+                                echo ############# ;
+                                if [[ '$TIMEZONE' == 'EST5EDT' ]]; then
+                                    crontab \$DEFAULT_CRONTAB/crontab.cent.est.mach$MACH_NUM_TARGET ;
+                                fi
+                                if [[ '$TIMEZONE' == 'CST6CDT' ]]; then 
+                                    crontab \$DEFAULT_CRONTAB/crontab.cent.cst.mach$MACH_NUM_TARGET ;
+                                fi  
+                                if [[ '$TIMEZONE' == 'MST7MDT' ]]; then
+                                    crontab \$DEFAULT_CRONTAB/crontab.cent.mst.mach$MACH_NUM_TARGET ;
+                                fi 
+                                if [[ '$TIMEZONE' == 'PST8PDT' ]]; then 
+                                    crontab \$DEFAULT_CRONTAB/crontab.cent.pst.mach$MACH_NUM_TARGET ;
+                                fi ;
+                            "
+                        """
+                        // if [[ '$TARGET_DISTRO' == 'dist' ]]; then
+                        //             crontab \$DEFAULT_CRONTAB/crontab.${TARGET_DISTRO}.mach$MACH_NUM_TARGET ;
+                        //         else 
+                        //         fi ;
+                    }
+                }
+            }
+        }
+        stage("Setup the default common files on the destination server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            DEFAULT_COMMON="\${tempPath}/default/common"
+                            DEFAULT_USERS="\${tempPath}/default/users"
+                            SITE_Value=\$(echo $SITE_ID | cut -c -2) ;
+
+                            VER_DEFAULT_LOG_LOC="/home/oasis/COMMISSION/verify/defaultFileSetup.log"
+                            VER_SERVER_LOG_LOC="/home/oasis/COMMISSION/verify/verify_basic_setup.log"
+                            DIR_SETUP_LOG_LOC="/home/oasis/COMMISSION/verify/dirSETUP.log"
+                            
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                        
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "                            
+                                echo ########## ;
+                                echo  ;
+                                echo ########## ;
+                                if [[ ! -e /var/fedex/APP/ofld/CFmacAddress ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/CFmacAddress ;
+                                else
+                                    echo '/var/fedex/APP/ofld/CFmacAddress exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/fedex/APP/ofld/SCANODSDIM ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/SCANODSDIM ;
+                                else
+                                    echo '/var/fedex/APP/ofld/SCANODSDIM exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/fedex/APP/ofld/SCANODSQA ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/SCANODSQA ;
+                                else
+                                    echo '/var/fedex/APP/ofld/SCANODSQA exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/fedex/APP/ofld/TRLROFF ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/TRLROFF ;
+                                else
+                                    echo '/var/fedex/APP/ofld/TRLROFF exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/fedex/APP/ofld/CFconsSmalls ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/CFconsSmalls ;
+                                else
+                                    echo '/var/fedex/APP/ofld/CFconsSmalls exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/fedex/APP/ofld/CFautoSwak ]] ; then 
+                                    echo 0 > /var/fedex/APP/ofld/CFautoSwak ;
+                                else
+                                    echo '/var/fedex/APP/ofld/CFautoSwak exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/company/APP/ofld/CFzipCorrection ]] ; then 
+                                    echo 0 > /var/company/APP/ofld/CFzipCorrection ;
+                                else
+                                    echo '/var/company/APP/ofld/CFzipCorrection exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/company/APP/ofld/CFflatScanFile ]] ; then 
+                                    echo 0 > /var/company/APP/ofld/CFflatScanFile ;
+                                else
+                                    echo '/var/company/APP/ofld/CFflatScanFile exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/company/APP/ofld/CFvScanFile ]] ; then 
+                                    echo 0 > /var/company/APP/ofld/CFvScanFile ;
+                                else
+                                    echo '/var/company/APP/ofld/CFvScanFile exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi
+                                if [[ ! -e /var/company/APP/ofld/CFbackupSend ]] ; then 
+                                    echo 0 > /var/company/APP/ofld/CFbackupSend ;
+                                else
+                                    echo '/var/company/APP/ofld/CFbackupSend exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+                                if [[ ! -e /var/company/APP/ofld/trlrCFtmsWorkControl ]] ; then 
+                                    echo '0 1 0 1132447' > /var/company/APP/ofld/trlrCFtmsWorkControl ;
+                                else
+                                    echo '/var/company/APP/ofld/trlrCFtmsWorkControl exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                fi ;
+
+                                echo ######################## ;
+                                echo PFsystemParams ;
+                                echo ######################## ;
+                                sed 's/SYRA/\$site/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                sed 's/APP1/$SITE_ID/' \$DEFAULT_COMMON/PFsystemParams.tmp > \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/APP2/$ALT_ID/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                sed 's/APP3/$LCITY_NUM/' \$DEFAULT_COMMON/PFsystemParams.tmp > \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/APP4/$HD_ID/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                sed 's/HUB2/$AS400/g' \$DEFAULT_COMMON/PFsystemParams.tmp > \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/ONE_LEVEL_SORTER_FLAG                 0/ONE_LEVEL_SORTER_FLAG                 $SORT_FLAG/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/SORT_TO_BAG_SORTER                    0/SORT_TO_BAG_SORTER                    $BAG_SORT/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/MULTI_SEC_SITE                        N/MULTI_SEC_SITE                        $MULTI_SEC/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/TNS_NAME                              FXGFSDDB/TNS_NAME                              $TNS_NAME/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/SITE_COUNTRY_CODE                     840/SITE_COUNTRY_CODE                     $COUNTRY_CODE/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                sed 's/DO_PRELOAD                            Y/DO_PRELOAD                            $DO_PRELOAD/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                if (( $COUNTRY_CODE == 124 )) ; then
+                                    sed 's/ALLOW_HAZ_CHECK                       Y/ALLOW_HAZ_CHECK                       N/' \$DEFAULT_COMMON/PFsystemParams > \$DEFAULT_COMMON/PFsystemParams.tmp ;
+                                    mv \$DEFAULT_COMMON/PFsystemParams.tmp \$DEFAULT_COMMON/PFsystemParams ;
+                                fi ;
+
+                                echo ################## ;
+                                echo Common Files ;
+                                echo ################## ;
+                                sed 's/APP1/$LCITY_NUM/' \$DEFAULT_COMMON/PFexpControlFile > \$DEFAULT_COMMON/PFexpControlFile.tmp ;
+                                mv \$DEFAULT_COMMON/PFexpControlFile.tmp \$DEFAULT_COMMON/PFexpControlFile ;
+
+                                sed 's/MACH1/\$host/g' \$DEFAULT_COMMON/PFtcpConnectionInfo > \$DEFAULT_COMMON/PFtcpConnectionInfo.tmp ;
+                                mv \$DEFAULT_COMMON/PFtcpConnectionInfo.tmp \$DEFAULT_COMMON/PFtcpConnectionInfo ;
+                                sed 's/MACH1/\$host/g' \$DEFAULT_COMMON/PFtcpConnectionInfo.PROD > \$DEFAULT_COMMON/PFtcpConnectionInfo.tmp ;
+                                mv \$DEFAULT_COMMON/PFtcpConnectionInfo.tmp \$DEFAULT_COMMON/PFtcpConnectionInfo.PROD ;
+
+                                sed 's/APP1/$SITE_ID/' \$DEFAULT_COMMON/dvcePFswakInfo > \$DEFAULT_COMMON/dvcePFswakInfo.tmp ;
+                                mv \$DEFAULT_COMMON/dvcePFswakInfo.tmp \$DEFAULT_COMMON/dvcePFswakInfo ;
+
+                                
+								sed 's/MACHINE_NAME/\$host/' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.tmp ;
+								sed 's/APPNUM1/$MACH_NUM_TARGET/' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.tmp > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties ;
+								
+								sed 's/MACHINE_NAME/\$host/' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+								sed 's/APPNUM1/$MACH_NUM_TARGET/' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod ; 
+									
+                                
+                       
+                                if (( \$SITE_Value == 1 )) ; then
+                                    sed 's/L3/L1/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                elif (( \$SITE_Value == 2 )) || (( \$SITE_Value == 3 )) ; then
+                                    sed 's/L3/L2/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                elif (( \$SITE_Value == 5 )) || (( \$SITE_Value == 7 )) || (( \$SITE_Value == 8 )) ; then
+                                    sed 's/L3/L6/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                elif (( \$SITE_Value == 6 )) ; then
+                                    sed 's/L3/L4/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                elif (( \$SITE_Value == 9 )) ; then
+                                    sed 's/L3/L5/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                elif (( \$SITE_Value == 0 )) || (( \$SITE_Value == 61 )) ; then
+                                    sed 's/L3/L1/g' \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod > \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                else
+                                    cp -p \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp ;
+                                fi ;
+                                mv \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prodtmp \$DEFAULT_COMMON/PFAPPSubscriberOpfProperties.prod ;
+
+                                sed 's/APP1/$SITE_ID/' \$DEFAULT_COMMON/PFpropertiesHOS > \$DEFAULT_COMMON/PFpropertiesHOS.tmp ;
+                                mv \$DEFAULT_COMMON/PFpropertiesHOS.tmp \$DEFAULT_COMMON/PFpropertiesHOS ;
+								
+				                sed 's/APP1/$SITE_ID/' \$DEFAULT_COMMON/PFpropertiesHOS.PROD > \$DEFAULT_COMMON/PFpropertiesHOS.PROD.tmp ;
+						        mv \$DEFAULT_COMMON/PFpropertiesHOS.PROD.tmp \$DEFAULT_COMMON/PFpropertiesHOS.PROD ;
+                                
+                                sed 's/MACHINE_NAME/\$host/' \$DEFAULT_COMMON/PFAPPSharedProperties > \$DEFAULT_COMMON/PFAPPSharedProperties.tmp ;
+                                mv \$DEFAULT_COMMON/PFAPPSharedProperties.tmp \$DEFAULT_COMMON/PFAPPSharedProperties ;
+
+                                sed 's/APP1/\$host/g' \$DEFAULT_COMMON/APPWrapperService-prod.properties > \$DEFAULT_COMMON/APPWrapperService-prodtmp.properties ;
+                                sed 's/APP3/$IP_ADDRESS/g' \$DEFAULT_COMMON/APPWrapperService-prodtmp.properties > \$DEFAULT_COMMON/APPWrapperService-prod.properties ;
+                        
+                                sed 's/APP1/\$host/g' \$DEFAULT_COMMON/APPWrapperService-test.properties > \$DEFAULT_COMMON/APPWrapperService-prodtmp.properties ;
+                                sed 's/APP3/$IP_ADDRESS/g' \$DEFAULT_COMMON/APPWrapperService-prodtmp.properties > \$DEFAULT_COMMON/APPWrapperService-test.properties ;
+                        
+                                sed 's/APP3/\$host/g' \$DEFAULT_COMMON/APP-serviceregistry-override.properties > \$DEFAULT_COMMON/APP-serviceregistry-overridetmp.properties ;
+                                sed 's/APP4/$IP_ADDRESS/g' \$DEFAULT_COMMON/APP-serviceregistry-overridetmp.properties > \$DEFAULT_COMMON/APP-serviceregistry-override.properties ;
+                                sed 's/APP5/$OTHER_SERVER/g' \$DEFAULT_COMMON/APP-serviceregistry-override.properties > \$DEFAULT_COMMON/APP-serviceregistry-overridetmp.properties ;
+				                sed 's/APP6/$MACH_NUM_TARGET/g' \$DEFAULT_COMMON/APP-serviceregistry-overridetmp.properties > \$DEFAULT_COMMON/APP-serviceregistry-override.properties ;
+								
+								
+                                sed 's/APP1/\$host/g' \$DEFAULT_COMMON/smallsservice-override.properties > \$DEFAULT_COMMON/smallsservice-overridetmp.properties ;
+                                sed 's/APP2/$IP_ADDRESS/g' \$DEFAULT_COMMON/smallsservice-overridetmp.properties > \$DEFAULT_COMMON/smallsservice-override.properties ;
+                        
+                                sed 's/APP1/$SITE_ID/g' \$DEFAULT_COMMON/dvcePFpreloadConfig.prod > \$DEFAULT_COMMON/dvcePFpreloadConfig.tmp ;
+                                mv \$DEFAULT_COMMON/dvcePFpreloadConfig.tmp \$DEFAULT_COMMON/dvcePFpreloadConfig.prod ;
+
+                                sed 's/MACHINE_NAME/\$host/g' \$DEFAULT_COMMON/PFnodeId > \$DEFAULT_COMMON/PFnodeId.tmp ;
+                                mv \$DEFAULT_COMMON/PFnodeId.tmp \$DEFAULT_COMMON/PFnodeId ;
+
+                                sed 's/HUB2/$AS400/g' \$DEFAULT_COMMON/utilPFdwldMaintConfig.PROD > \$DEFAULT_COMMON/utilPFdwldMaintConfig.tmp ;
+                                mv \$DEFAULT_COMMON/utilPFdwldMaintConfig.tmp \$DEFAULT_COMMON/utilPFdwldMaintConfig.PROD ;
+
+                                sed 's/HUB2/$AS400/g' \$DEFAULT_COMMON/PFdownloads.PROD > \$DEFAULT_COMMON/PFdownloads.tmp ;
+                                mv \$DEFAULT_COMMON/PFdownloads.tmp \$DEFAULT_COMMON/PFdownloads.PROD ;
+
+                                sed 's/APP1/\$host/g' \$DEFAULT_COMMON/PFotherMachComm > \$DEFAULT_COMMON/PFotherMachComm.tmp ;
+                                mv \$DEFAULT_COMMON/PFotherMachComm.tmp \$DEFAULT_COMMON/PFotherMachComm ;
+
+                                if [[ '$TARGET_DISTRO' == 'dist' && '$osSystem' == 'AIX' ]] ; then
+                                    sed 's/ChaMonitor 1 s Y/ChaMonitor 1 s man Y/' \$DEFAULT_COMMON/PFserverApps > \$DEFAULT_COMMON/PFserverApps.tmp ;
+                                    mv \$DEFAULT_COMMON/PFserverApps.tmp \$DEFAULT_COMMON/PFserverApps ;
+                                fi ;
+                                
+                               
+								sed 's/APP1/\$host/g' \$DEFAULT_COMMON/PFsmsMachines > \$DEFAULT_COMMON/PFsmsMachines.tmp ;
+								sed 's/APP2/$OTHER_SERVER/g' \$DEFAULT_COMMON/PFsmsMachines.tmp > \$DEFAULT_COMMON/PFsmsMachines ;
+                          
+
+                                if [[ '$TARGET_DISTRO' == 'dist' ]] ; then
+                                    
+									echo '$SECOND_MACH_IP 30700' > \$DEFAULT_COMMON/PFhaMonitor ;
+                                    
+                                fi
+                            "
+                        """
+                    }
+                }
+            }
+        }
+        stage("Copy the default /tmp/common files to /var/company/APP/common/") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            DEFAULT_COMMON="\${tempPath}/default/common"
+                            DEFAULT_USERS="\${tempPath}/default/users"
+                            SERVER_COMMON="/var/company/APP/common"
+                            VER_DEFAULT_LOG_LOC="/home/oasis/COMMAPPION/verify/defaultFileSetup.log"
+                            
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "ls \$DEFAULT_COMMON/ | grep -v GIT " > commonFileList.txt ;
+                            FILES=\$(cat commonFileList.txt) ;
+                            for file in \$FILES 
+                            do 
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                    chmod 664 \$DEFAULT_COMMON/\$file ;
+                                    if [[ ! -e \$SERVER_COMMON/\$file ]] ; then 
+                                        cp -p \$DEFAULT_COMMON/\$file \$SERVER_COMMON/\$file ;
+                                        chmod 664 \$SERVER_COMMON/\$file ;
+                                    else 
+                                        echo 'ERROR \$SERVER_COMMON/\$file exists already ' >> \$VER_DEFAULT_LOG_LOC ;
+                                    fi ;
+                                "
+                            done ;
+                        """
+                    }
+                }
+            }
+        }
+        stage("Setup GITLAB config files to Destination Server") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            tempPath="/tmp/commonDir"
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                        
+                            if [[ -e APP$BRANCH_NUM ]] ; then
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "ls \$tempPath/common " > commonFileList ;
+                                FILES=\$(cat commonFileList.txt) ;
+                                for f in \$FILES 
+                                do 
+                                    ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                        chmod 666 /var/company/APP/common/PFchuteConfig ;
+                                        cp -p /var/company/APP/common/\$f \$tempPath/backupCommon/\$f ;
+                                        cp -p \$tempPath/common/\$f /var/company/APP/common/\$f ;  
+                                        chmod 664 /var/company/APP/common/\$f ;
+                                    "
+                                done ;
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                    chmod 444 /var/company/APP/common/PFchuteConfig ;  
+                                    
+                                    cp -p /home/oasis/.profile \$tempPath/users/backup/oasis/profile ;   
+                                    cp -p /home/oasis/.show_machine_info \$tempPath/users/backup/oasis/show_machine_info ;   
+
+                                    if [[ -e /home/oasis/.netrc ]] ; then 
+                                        cp -p /home/oasis/.netrc \$tempPath/users/backup/oasis/netrc ;   
+                                        cp -p \$tempPath/users/oasis/netrc /home/oasis/.netrc ; 
+                                        chmod 600 /home/oasis/.netrc ;    
+                                    fi ;
+
+                                    if [[ -e /home/oasis/.rhosts ]] ; then 
+                                        cp -p /home/oasis/.rhosts \$tempPath/users/backup/oasis/rhosts ;   
+                                        cp -p \$tempPath/users/oasis/rhosts /home/oasis/.rhosts ; 
+                                        chmod 600 /home/oasis/.rhosts ;  
+                                    fi ;
+
+                                    cp -p \$tempPath/users/oasis/profile /home/oasis/.profile ;  
+                                    chmod 750 /home/oasis/.profile ;  
+                                    cp \$tempPath/users/oasis/show_machine_info /home/oasis/.show_machine_info ;  
+                                    chmod 750 /home/oasis/.show_machine_info ;  
+
+                                "
+                                ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "ls \$tempPath/crontab" > cronFileList.txt ;
+                                CRONFILES=\$(cat cronFileList.txt) ;
+                                for file in \$CRONFILES
+                                do 
+                                    ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "crontab \$tempPath/crontab/\$file ;"
+                                done ;
+                            fi ; 
+                        """
+                    }
+                }
+            }
+        }
+        stage("Display logs") {
+            steps {
+                script {
+                    sshagent(credentials : ['SystemTeam_Master_SSH_Key']) {
+                        sh """
+                            VER_DEFAULT_LOG_LOC="/home/oasis/COMMISSION/verify/defaultFileSetup.log"
+                            VER_SERVER_LOG_LOC="/home/oasis/COMMISSION/verify/verify_basic_setup.log"
+                            DIR_SETUP_LOG_LOC="/home/oasis/COMMISSION/verify/dirSETUP.log"
+                            host=\$(echo $GIT_BRANCH$BRANCH_NUM | cut -d "/" -f 2 )
+                            site=\$(echo $GIT_BRANCH | cut -d "/" -f 2 )
+                            ssh -o StrictHostKeyChecking=no oasis@\$host$DOMAIN "
+                                cat \$VER_DEFAULT_LOG_LOC ;
+                                cat \$VER_SERVER_LOG_LOC ;
+                                cat \$DIR_SETUP_LOG_LOC ;
+                                mv /tmp/commonDir/CONFG_APPLI_PARM.sql /home/oasis/COMMISSION/ ;
+                                mv /tmp/commonDir/update_jms_queues.sql /home/oasis/COMMISSION/ ;
+                                mv /tmp/commonDir/utilSbuildDBConfig.sh /home/oasis/COMMISSION/ ;
+                                mv /tmp/commonDir/utilSbuildDBConfig.LINUX.sh /home/oasis/COMMISSION/ ;
+                            "
+                        """
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            cleanWs()
+        }
+    }
+}
