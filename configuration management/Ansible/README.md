@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 Ansible notes
   --- starts yaml
   - \ line continuance
@@ -10,6 +9,3 @@ Ansible notes
     - /etc/ansible/hosts global inventory file
     
     
-=======
-- Hosts
->>>>>>> 32db2f391a13a9bf8ea779cb038cb315bea16c35
