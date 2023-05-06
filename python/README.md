@@ -53,4 +53,4 @@ Loops
 - colon is important
 - range() for numbers
     - Ends before end range number
-- 
+- Can loop through a file have to open() it first
