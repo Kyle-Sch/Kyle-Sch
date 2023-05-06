@@ -1,0 +1,6 @@
+- manifest, templates, files make up modules
+- puppet client on target vms
+- puppet master server
+- manifest how to config a node 
+    - run on client by agent
+    - written in ruby 
