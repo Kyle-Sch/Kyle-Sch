@@ -1,0 +1,52 @@
+###############################################################################
+# templates/python-deploy.yml
+# Stage: Rolling deploy to AKS, waits for rollout to complete
+###############################################################################
+parameters:
+  - name: imageRepository
+    type: string
+  - name: k8sNamespace
+    type: string
+  - name: k8sDeployment
+    type: string
+  - name: azureSubscription
+    type: string
+    default: "Azure-ServiceConnection"
+  - name: environment
+    type: string
+    default: "production"
+  - name: imageTagVar
+    type: string
+    default: "IMAGE_TAG"
+
+jobs:
+  - deployment: DeployToAKS
+    displayName: "Deploy to AKS"
+    pool:
+      vmImage: "ubuntu-latest"
+    environment: "${{ parameters.environment }}"
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - task: AzureCLI@2
+              displayName: "Get AKS credentials"
+              inputs:
+                azureSubscription: "${{ parameters.azureSubscription }}"
+                scriptType: bash
+                scriptLocation: inlineScript
+                inlineScript: |
+                  az aks get-credentials \
+                    --resource-group $(AKS_RESOURCE_GROUP) \
+                    --name $(AKS_CLUSTER_NAME) \
+                    --overwrite-existing
+
+            - script: |
+                kubectl set image deployment/${{ parameters.k8sDeployment }} \
+                  app=$(ACR_LOGIN_SERVER)/${{ parameters.imageRepository }}:$(${{ parameters.imageTagVar }}) \
+                  --namespace ${{ parameters.k8sNamespace }}
+
+                kubectl rollout status deployment/${{ parameters.k8sDeployment }} \
+                  --namespace ${{ parameters.k8sNamespace }} \
+                  --timeout=5m
+              displayName: "Rolling deploy"

@@ -1,0 +1,32 @@
+###############################################################################
+# python-deploy-pipeline.yml — Deploy image to AKS
+# Trigger manually or chain from python-publish-pipeline.
+###############################################################################
+
+trigger: none
+
+parameters:
+  - name: imageTag
+    type: string
+    displayName: "Image tag to deploy (Build ID)"
+    default: "latest"
+
+variables:
+  - group: acr-credentials   # ACR_LOGIN_SERVER
+  - group: aks-credentials   # AKS_RESOURCE_GROUP, AKS_CLUSTER_NAME
+  - name: IMAGE_REPOSITORY
+    value: "myapp/worker"
+  - name: K8S_NAMESPACE
+    value: "workers"
+  - name: K8S_DEPLOYMENT
+    value: "worker-service"
+
+stages:
+  - stage: Deploy
+    displayName: "Deploy to AKS"
+    jobs:
+      - template: templates/python-deploy.yml
+        parameters:
+          imageRepository: $(IMAGE_REPOSITORY)
+          k8sNamespace:    $(K8S_NAMESPACE)
+          k8sDeployment:   $(K8S_DEPLOYMENT)

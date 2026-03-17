@@ -1,0 +1,120 @@
+###############################################################################
+# templates/liquibase-deploy.yml
+# Runs Liquibase update against a target database.
+# Supports updateSQL (dry-run), update, rollbackCount, and tag operations.
+###############################################################################
+parameters:
+  - name: liquibaseVersion
+    type: string
+    default: "4.27.0"
+  - name: changelogFile
+    type: string
+    default: "databases/liquibase/changelog-master.xml"
+  - name: dbUrl
+    type: string                    # e.g. jdbc:sqlserver://myserver:1433;databaseName=ecommerce
+  - name: dbUsername
+    type: string
+  - name: dbPassword
+    type: string                    # Pass as a secret variable — never hardcode
+  - name: contexts
+    type: string
+    default: ""                     # e.g. "seed" to include seed data, "!seed" to exclude
+  - name: runDryRun
+    type: boolean
+    default: false                  # When true, runs updateSQL instead of update
+  - name: environment
+    type: string
+    default: "dev"
+  - name: tagAfterDeploy
+    type: boolean
+    default: true                   # Tags the DB with the build ID for rollback reference
+
+jobs:
+  - deployment: LiquibaseDeploy
+    displayName: "Liquibase — ${{ parameters.environment }}"
+    pool:
+      vmImage: "ubuntu-latest"
+    environment: "${{ parameters.environment }}"
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            # ----------------------------------------------------------------
+            # Install Liquibase CLI
+            # ----------------------------------------------------------------
+            - script: |
+                curl -sL https://github.com/liquibase/liquibase/releases/download/v${{ parameters.liquibaseVersion }}/liquibase-${{ parameters.liquibaseVersion }}.tar.gz \
+                  | tar xz -C /usr/local/bin liquibase
+                liquibase --version
+              displayName: "Install Liquibase ${{ parameters.liquibaseVersion }}"
+
+            # ----------------------------------------------------------------
+            # Validate changelog XML structure before touching the DB
+            # ----------------------------------------------------------------
+            - script: |
+                liquibase \
+                  --changeLogFile="${{ parameters.changelogFile }}" \
+                  --url="${{ parameters.dbUrl }}" \
+                  --username="${{ parameters.dbUsername }}" \
+                  --password="${{ parameters.dbPassword }}" \
+                  validate
+              displayName: "Validate changelog"
+
+            # ----------------------------------------------------------------
+            # Dry-run: print SQL that would be executed (no DB changes)
+            # ----------------------------------------------------------------
+            - ${{ if eq(parameters.runDryRun, true) }}:
+              - script: |
+                  liquibase \
+                    --changeLogFile="${{ parameters.changelogFile }}" \
+                    --url="${{ parameters.dbUrl }}" \
+                    --username="${{ parameters.dbUsername }}" \
+                    --password="${{ parameters.dbPassword }}" \
+                    ${{ if ne(parameters.contexts, '') }}--contexts="${{ parameters.contexts }}"${{ end }} \
+                    updateSQL | tee $(Build.ArtifactStagingDirectory)/pending-sql.txt
+                displayName: "Dry-run: generate pending SQL"
+
+              - task: PublishPipelineArtifact@1
+                displayName: "Publish pending SQL artifact"
+                inputs:
+                  targetPath: "$(Build.ArtifactStagingDirectory)/pending-sql.txt"
+                  artifact: liquibase-pending-sql
+                  publishLocation: pipeline
+
+            # ----------------------------------------------------------------
+            # Live update — apply all pending changesets
+            # ----------------------------------------------------------------
+            - ${{ if eq(parameters.runDryRun, false) }}:
+              - script: |
+                  liquibase \
+                    --changeLogFile="${{ parameters.changelogFile }}" \
+                    --url="${{ parameters.dbUrl }}" \
+                    --username="${{ parameters.dbUsername }}" \
+                    --password="${{ parameters.dbPassword }}" \
+                    ${{ if ne(parameters.contexts, '') }}--contexts="${{ parameters.contexts }}"${{ end }} \
+                    update
+                displayName: "Apply pending changesets"
+                env:
+                  LIQUIBASE_COMMAND_PASSWORD: ${{ parameters.dbPassword }}
+
+              # Tag the current DB state with the build ID for rollback reference
+              - ${{ if eq(parameters.tagAfterDeploy, true) }}:
+                - script: |
+                    liquibase \
+                      --changeLogFile="${{ parameters.changelogFile }}" \
+                      --url="${{ parameters.dbUrl }}" \
+                      --username="${{ parameters.dbUsername }}" \
+                      --password="${{ parameters.dbPassword }}" \
+                      tag "build-$(Build.BuildId)"
+                  displayName: "Tag DB state: build-$(Build.BuildId)"
+
+              # Show deployment history
+              - script: |
+                  liquibase \
+                    --changeLogFile="${{ parameters.changelogFile }}" \
+                    --url="${{ parameters.dbUrl }}" \
+                    --username="${{ parameters.dbUsername }}" \
+                    --password="${{ parameters.dbPassword }}" \
+                    history
+                displayName: "Show changelog history"
+                condition: always()

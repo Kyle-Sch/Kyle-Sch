@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <changeSet id="005-add-indexes" author="kyle.schneiderlochner">
+        <comment>Add covering and composite indexes for common query patterns.</comment>
+
+        <!-- Active customer email lookups -->
+        <createIndex tableName="customers" indexName="ix_customers_email">
+            <column name="email"/>
+        </createIndex>
+
+        <!-- Orders by customer — most common join pattern -->
+        <createIndex tableName="orders" indexName="ix_orders_customer_id">
+            <column name="customer_id"/>
+        </createIndex>
+
+        <!-- Fulfilment dashboard — filter by status, order by placed_at -->
+        <createIndex tableName="orders" indexName="ix_orders_status_placed">
+            <column name="status"/>
+            <column name="placed_at" descending="true"/>
+        </createIndex>
+
+        <!-- Inventory and sales reporting by product -->
+        <createIndex tableName="order_items" indexName="ix_order_items_product">
+            <column name="product_id"/>
+        </createIndex>
+
+        <!-- Product catalogue browsing by category -->
+        <createIndex tableName="products" indexName="ix_products_category">
+            <column name="category"/>
+            <column name="is_active"/>
+        </createIndex>
+
+        <rollback>
+            <dropIndex tableName="customers"   indexName="ix_customers_email"/>
+            <dropIndex tableName="orders"      indexName="ix_orders_customer_id"/>
+            <dropIndex tableName="orders"      indexName="ix_orders_status_placed"/>
+            <dropIndex tableName="order_items" indexName="ix_order_items_product"/>
+            <dropIndex tableName="products"    indexName="ix_products_category"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

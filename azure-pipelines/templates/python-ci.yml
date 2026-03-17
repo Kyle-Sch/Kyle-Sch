@@ -1,0 +1,54 @@
+###############################################################################
+# templates/python-ci.yml
+# Stage: Lint (ruff), Type-check (mypy), Test (pytest + coverage)
+###############################################################################
+parameters:
+  - name: pythonVersion
+    type: string
+    default: "3.12"
+
+jobs:
+  - job: LintTest
+    displayName: "Ruff · Mypy · Pytest"
+    pool:
+      vmImage: "ubuntu-latest"
+    steps:
+      - task: UsePythonVersion@0
+        displayName: "Use Python ${{ parameters.pythonVersion }}"
+        inputs:
+          versionSpec: ${{ parameters.pythonVersion }}
+
+      - script: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff mypy pytest pytest-cov
+        displayName: "Install dependencies"
+
+      - script: ruff check . --output-format=github
+        displayName: "Lint with ruff"
+
+      - script: mypy src/ --ignore-missing-imports --strict
+        displayName: "Type-check with mypy"
+        continueOnError: false
+
+      - script: |
+          pytest tests/ \
+            --cov=src \
+            --cov-report=xml:coverage.xml \
+            --cov-report=term-missing \
+            --junitxml=test-results.xml \
+            -v
+        displayName: "Run pytest"
+
+      - task: PublishTestResults@2
+        displayName: "Publish test results"
+        condition: always()
+        inputs:
+          testResultsFormat: JUnit
+          testResultsFiles: "test-results.xml"
+
+      - task: PublishCodeCoverageResults@1
+        displayName: "Publish coverage"
+        inputs:
+          codeCoverageTool: Cobertura
+          summaryFileLocation: coverage.xml

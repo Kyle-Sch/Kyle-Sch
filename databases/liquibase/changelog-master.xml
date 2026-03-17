@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  changelog-master.xml
+  Master changelog — includes all child changelogs in order.
+  Add new migration files here; never reorder existing entries.
+-->
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!-- Schema creation -->
+    <include file="changelogs/001-create-customers.xml"   relativeToChangelogFile="true"/>
+    <include file="changelogs/002-create-products.xml"    relativeToChangelogFile="true"/>
+    <include file="changelogs/003-create-orders.xml"      relativeToChangelogFile="true"/>
+    <include file="changelogs/004-create-order-items.xml" relativeToChangelogFile="true"/>
+    <include file="changelogs/005-add-indexes.xml"        relativeToChangelogFile="true"/>
+
+    <!-- Seed / reference data -->
+    <include file="changelogs/006-seed-categories.xml"    relativeToChangelogFile="true"/>
+
+    <!-- Schema migrations (post-initial) -->
+    <include file="changelogs/007-add-audit-columns.xml"  relativeToChangelogFile="true"/>
+
+</databaseChangeLog>

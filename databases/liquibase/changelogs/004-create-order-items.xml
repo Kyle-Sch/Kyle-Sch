@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <changeSet id="004-create-order-items" author="kyle.schneiderlochner">
+        <comment>Create order_items table with cascade delete from orders and positive qty/total constraints.</comment>
+
+        <createTable tableName="order_items">
+            <column name="item_id" type="INT" autoIncrement="true">
+                <constraints primaryKey="true" primaryKeyName="pk_order_items" nullable="false"/>
+            </column>
+            <column name="order_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_order_items_order"
+                             references="orders(order_id)"
+                             deleteCascade="true"/>
+            </column>
+            <column name="product_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_order_items_product"
+                             references="products(product_id)"/>
+            </column>
+            <column name="quantity" type="INT">
+                <constraints nullable="false"/>
+            </column>
+            <!-- Snapshot price at time of order — intentionally denormalised -->
+            <column name="unit_price" type="DECIMAL(10,2)">
+                <constraints nullable="false"/>
+            </column>
+            <column name="line_total" type="DECIMAL(12,2)">
+                <constraints nullable="false"/>
+            </column>
+        </createTable>
+
+        <addCheckConstraint
+            tableName="order_items"
+            constraintName="chk_quantity_positive"
+            constraintBody="quantity > 0"/>
+
+        <addCheckConstraint
+            tableName="order_items"
+            constraintName="chk_line_total"
+            constraintBody="line_total >= 0"/>
+
+        <rollback>
+            <dropTable tableName="order_items"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

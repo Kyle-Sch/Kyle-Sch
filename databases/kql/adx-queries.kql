@@ -1,0 +1,100 @@
+// =============================================================================
+// adx-queries.kql
+// Example KQL queries for Azure Data Explorer (Kusto)
+// Assumes a database named "Telemetry" with tables:
+//   Events    (Timestamp:datetime, EventName:string, ServiceName:string,
+//              Severity:string, Message:string, DurationMs:real, Region:string)
+//   Metrics   (Timestamp:datetime, MetricName:string, Value:real,
+//              ServiceName:string, Host:string)
+// =============================================================================
+
+
+// ---------------------------------------------------------------------------
+// Query 1: Time-Series — P50/P95/P99 API latency over 5-minute buckets
+// ---------------------------------------------------------------------------
+Events
+| where Timestamp >= ago(24h)
+| where EventName == "ApiRequest" and ServiceName == "api-server"
+| summarize
+    p50  = percentile(DurationMs, 50),
+    p95  = percentile(DurationMs, 95),
+    p99  = percentile(DurationMs, 99),
+    RequestCount = count()
+  by bin(Timestamp, 5m)
+| order by Timestamp asc
+
+
+// ---------------------------------------------------------------------------
+// Query 2: Summarize — Top 10 error sources in the last hour
+// ---------------------------------------------------------------------------
+Events
+| where Timestamp >= ago(1h)
+| where Severity in ("Error", "Critical")
+| summarize ErrorCount = count() by ServiceName, EventName
+| top 10 by ErrorCount desc
+| project ServiceName, EventName, ErrorCount
+
+
+// ---------------------------------------------------------------------------
+// Query 3: Join — Correlate high-latency API calls with CPU spikes
+// ---------------------------------------------------------------------------
+let HighLatency = Events
+| where Timestamp >= ago(6h)
+| where EventName == "ApiRequest" and DurationMs > 2000
+| project Timestamp, ServiceName, DurationMs, Region;
+
+let HighCpu = Metrics
+| where Timestamp >= ago(6h)
+| where MetricName == "cpu_usage_percent" and Value > 85
+| project Timestamp, Host, CpuValue = Value;
+
+HighLatency
+| join kind=inner (HighCpu) on $left.Region == $right.Host
+| where abs(datetime_diff('second', Timestamp, Timestamp1)) < 60
+| project
+    EventTime    = Timestamp,
+    ServiceName,
+    DurationMs,
+    Host,
+    CpuValue
+
+
+// ---------------------------------------------------------------------------
+// Query 4: Render chart — Request rate by service (stacked area)
+// ---------------------------------------------------------------------------
+Events
+| where Timestamp >= ago(12h)
+| where EventName == "ApiRequest"
+| summarize RequestsPerMinute = count() by bin(Timestamp, 1m), ServiceName
+| render areachart
+    with (
+        title    = "Request Rate by Service (last 12 hours)",
+        xtitle   = "Time",
+        ytitle   = "Requests / min",
+        legend   = visible
+    )
+
+
+// ---------------------------------------------------------------------------
+// Query 5: Anomaly Detection — Flag metric values outside expected range
+// Uses series_decompose_anomalies() to identify outliers automatically
+// ---------------------------------------------------------------------------
+Metrics
+| where Timestamp >= ago(7d)
+| where MetricName == "memory_usage_bytes" and ServiceName == "api-server"
+| make-series AvgMemory = avg(Value) on Timestamp
+    from ago(7d) to now() step 5m
+    by Host
+| extend (
+    AnomalyScores,
+    Baseline,
+    Seasonality
+  ) = series_decompose_anomalies(AvgMemory, 1.5)
+| mv-expand
+    Timestamp to typeof(datetime),
+    AvgMemory to typeof(real),
+    AnomalyScores to typeof(real),
+    Baseline to typeof(real)
+| where AnomalyScores != 0
+| project Timestamp, Host, AvgMemory, AnomalyScores, Baseline
+| order by abs(AnomalyScores) desc

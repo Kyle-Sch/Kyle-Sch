@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <changeSet id="003-create-orders" author="kyle.schneiderlochner">
+        <comment>Create orders table with FK to customers and status check constraint.</comment>
+
+        <createTable tableName="orders">
+            <column name="order_id" type="INT" autoIncrement="true">
+                <constraints primaryKey="true" primaryKeyName="pk_orders" nullable="false"/>
+            </column>
+            <column name="customer_id" type="INT">
+                <constraints nullable="false"
+                             foreignKeyName="fk_orders_customer"
+                             references="customers(customer_id)"/>
+            </column>
+            <column name="status" type="VARCHAR(30)" defaultValue="pending">
+                <constraints nullable="false"/>
+            </column>
+            <column name="shipping_addr" type="VARCHAR(500)"/>
+            <column name="subtotal" type="DECIMAL(12,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="tax_amount" type="DECIMAL(12,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="total_amount" type="DECIMAL(12,2)" defaultValueNumeric="0">
+                <constraints nullable="false"/>
+            </column>
+            <column name="placed_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_at" type="DATETIME" defaultValueComputed="CURRENT_TIMESTAMP">
+                <constraints nullable="false"/>
+            </column>
+            <column name="notes" type="VARCHAR(1000)"/>
+        </createTable>
+
+        <addCheckConstraint
+            tableName="orders"
+            constraintName="chk_order_status"
+            constraintBody="status IN ('pending','confirmed','processing','shipped','delivered','cancelled','refunded')"/>
+
+        <rollback>
+            <dropTable tableName="orders"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

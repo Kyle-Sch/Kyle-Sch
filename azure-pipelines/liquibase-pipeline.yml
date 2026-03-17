@@ -1,0 +1,116 @@
+###############################################################################
+# liquibase-pipeline.yml — Database migration orchestrator
+#
+# Flow:
+#   1. PR / feature branch  → dry-run only (generates pending SQL artifact)
+#   2. Merge to main        → apply to dev  (no approval)
+#   3. Merge to main        → apply to staging (auto, after dev succeeds)
+#   4. Manual release       → apply to prod (ADO environment approval gate)
+#
+# Secrets are stored in the "db-credentials-<env>" variable groups and
+# never appear in pipeline logs (secret variables are masked).
+###############################################################################
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - databases/liquibase/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - databases/liquibase/**
+
+variables:
+  - name: LIQUIBASE_VERSION
+    value: "4.27.0"
+  - name: CHANGELOG_FILE
+    value: "databases/liquibase/changelog-master.xml"
+
+stages:
+  # ---------------------------------------------------------------------------
+  # Stage 1: Dry-run — always runs, including on PRs
+  # Generates a "pending SQL" artifact so reviewers can inspect changes.
+  # ---------------------------------------------------------------------------
+  - stage: DryRun
+    displayName: "Dry-run (pending SQL)"
+    jobs:
+      - template: templates/liquibase-deploy.yml
+        parameters:
+          liquibaseVersion: $(LIQUIBASE_VERSION)
+          changelogFile:    $(CHANGELOG_FILE)
+          dbUrl:            $(DB_URL_DEV)
+          dbUsername:       $(DB_USERNAME_DEV)
+          dbPassword:       $(DB_PASSWORD_DEV)
+          runDryRun:        true
+          environment:      "dev"
+
+  # ---------------------------------------------------------------------------
+  # Stage 2: Deploy to Dev — runs on main branch merges only
+  # ---------------------------------------------------------------------------
+  - stage: DeployDev
+    displayName: "Deploy → Dev"
+    dependsOn: DryRun
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    variables:
+      - group: db-credentials-dev    # DB_URL_DEV, DB_USERNAME_DEV, DB_PASSWORD_DEV
+    jobs:
+      - template: templates/liquibase-deploy.yml
+        parameters:
+          liquibaseVersion: $(LIQUIBASE_VERSION)
+          changelogFile:    $(CHANGELOG_FILE)
+          dbUrl:            $(DB_URL_DEV)
+          dbUsername:       $(DB_USERNAME_DEV)
+          dbPassword:       $(DB_PASSWORD_DEV)
+          contexts:         "!seed"   # exclude seed data in dev automated runs
+          runDryRun:        false
+          environment:      "dev"
+          tagAfterDeploy:   true
+
+  # ---------------------------------------------------------------------------
+  # Stage 3: Deploy to Staging — auto after dev succeeds
+  # ---------------------------------------------------------------------------
+  - stage: DeployStaging
+    displayName: "Deploy → Staging"
+    dependsOn: DeployDev
+    condition: succeeded()
+    variables:
+      - group: db-credentials-staging  # DB_URL_STAGING, DB_USERNAME_STAGING, DB_PASSWORD_STAGING
+    jobs:
+      - template: templates/liquibase-deploy.yml
+        parameters:
+          liquibaseVersion: $(LIQUIBASE_VERSION)
+          changelogFile:    $(CHANGELOG_FILE)
+          dbUrl:            $(DB_URL_STAGING)
+          dbUsername:       $(DB_USERNAME_STAGING)
+          dbPassword:       $(DB_PASSWORD_STAGING)
+          runDryRun:        false
+          environment:      "staging"
+          tagAfterDeploy:   true
+
+  # ---------------------------------------------------------------------------
+  # Stage 4: Deploy to Prod — manual approval gate on "db-prod" ADO environment
+  # ---------------------------------------------------------------------------
+  - stage: DeployProd
+    displayName: "Deploy → Prod"
+    dependsOn: DeployStaging
+    condition: succeeded()
+    variables:
+      - group: db-credentials-prod     # DB_URL_PROD, DB_USERNAME_PROD, DB_PASSWORD_PROD
+    jobs:
+      - template: templates/liquibase-deploy.yml
+        parameters:
+          liquibaseVersion: $(LIQUIBASE_VERSION)
+          changelogFile:    $(CHANGELOG_FILE)
+          dbUrl:            $(DB_URL_PROD)
+          dbUsername:       $(DB_USERNAME_PROD)
+          dbPassword:       $(DB_PASSWORD_PROD)
+          runDryRun:        false
+          environment:      "db-prod"  # ADO environment with approval gate configured
+          tagAfterDeploy:   true

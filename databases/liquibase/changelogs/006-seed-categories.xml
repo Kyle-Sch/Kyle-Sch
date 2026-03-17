@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Seed data changesets use context="seed" so they can be excluded from
+      production runs: liquibase update - -contexts=!seed
+      Or explicitly included in dev/staging: - -contexts=seed
+    -->
+    <changeSet id="006-seed-sample-products" author="kyle.schneiderlochner"
+               context="seed">
+        <comment>Seed sample products for dev/staging environments only.</comment>
+
+        <insert tableName="products">
+            <column name="sku"        value="PKG-FASTAPI-001"/>
+            <column name="name"       value="FastAPI Starter Kit"/>
+            <column name="description" value="Boilerplate FastAPI project with auth and Docker support."/>
+            <column name="unit_price" valueNumeric="49.99"/>
+            <column name="stock_qty"  valueNumeric="500"/>
+            <column name="category"   value="software"/>
+        </insert>
+
+        <insert tableName="products">
+            <column name="sku"        value="PKG-TERRAFORM-001"/>
+            <column name="name"       value="Terraform AKS Module"/>
+            <column name="description" value="Production-ready Terraform module for AKS with workload identity."/>
+            <column name="unit_price" valueNumeric="99.99"/>
+            <column name="stock_qty"  valueNumeric="999"/>
+            <column name="category"   value="infrastructure"/>
+        </insert>
+
+        <insert tableName="products">
+            <column name="sku"        value="PKG-AIRAG-001"/>
+            <column name="name"       value="RAG Pipeline Template"/>
+            <column name="description" value="Azure AI Search + GPT-4o RAG pipeline with workload identity auth."/>
+            <column name="unit_price" valueNumeric="149.99"/>
+            <column name="stock_qty"  valueNumeric="250"/>
+            <column name="category"   value="ai"/>
+        </insert>
+
+        <rollback>
+            <delete tableName="products">
+                <where>sku IN ('PKG-FASTAPI-001','PKG-TERRAFORM-001','PKG-AIRAG-001')</where>
+            </delete>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

@@ -1,0 +1,73 @@
+###############################################################################
+# templates/terraform-apply.yml
+# Stage: Download saved plan artifact → init → apply (requires ADO approval)
+###############################################################################
+parameters:
+  - name: tfVersion
+    type: string
+    default: "1.7.5"
+  - name: tfWorkingDir
+    type: string
+  - name: artifactSuffix
+    type: string
+    default: ""   # Must match the suffix used in the corresponding terraform-plan job
+  - name: tfBackendRg
+    type: string
+  - name: tfBackendSa
+    type: string
+  - name: tfBackendContainer
+    type: string
+  - name: serviceConnection
+    type: string
+    default: "Azure-ServiceConnection"
+  - name: environment
+    type: string
+    default: "infrastructure-prod"
+
+jobs:
+  - deployment: TerraformApply
+    displayName: "Apply approved plan"
+    pool:
+      vmImage: "ubuntu-latest"
+    # Manual approval gate is configured on the ADO environment referenced here
+    environment: "${{ parameters.environment }}"
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+            - task: TerraformInstaller@1
+              displayName: "Install Terraform ${{ parameters.tfVersion }}"
+              inputs:
+                terraformVersion: ${{ parameters.tfVersion }}
+
+            - task: DownloadPipelineArtifact@2
+              displayName: "Download plan artifact"
+              inputs:
+                artifact: "terraform-plan${{ parameters.artifactSuffix }}"
+                path: ${{ parameters.tfWorkingDir }}
+
+            - task: TerraformTaskV4@4
+              displayName: "Terraform Init"
+              inputs:
+                provider: azurerm
+                command: init
+                workingDirectory: ${{ parameters.tfWorkingDir }}
+                backendServiceArm: "${{ parameters.serviceConnection }}"
+                backendAzureRmResourceGroupName: ${{ parameters.tfBackendRg }}
+                backendAzureRmStorageAccountName: ${{ parameters.tfBackendSa }}
+                backendAzureRmContainerName: ${{ parameters.tfBackendContainer }}
+                backendAzureRmKey: "${{ parameters.tfWorkingDir }}.tfstate"
+
+            - task: TerraformTaskV4@4
+              displayName: "Terraform Apply (saved plan)"
+              inputs:
+                provider: azurerm
+                command: apply
+                workingDirectory: ${{ parameters.tfWorkingDir }}
+                commandOptions: "tfplan"
+                environmentServiceNameAzureRM: "${{ parameters.serviceConnection }}"
+              env:
+                ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+                ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+                ARM_TENANT_ID: $(ARM_TENANT_ID)
+                ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
