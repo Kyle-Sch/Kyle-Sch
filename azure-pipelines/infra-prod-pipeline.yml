@@ -1,0 +1,103 @@
+###############################################################################
+# infra-prod-pipeline.yml — Terraform prod environment
+#
+# PR  → plan only (no apply)
+# main merge → plan + apply with manual approval gate on "infrastructure-prod"
+#
+# State files:
+#   prod/aks-cluster.tfstate
+#   prod/azure-storage.tfstate
+###############################################################################
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+
+pr:
+  branches:
+    include:
+      - main
+  paths:
+    include:
+      - terraform/**
+
+variables:
+  - group: terraform-sp
+  - name: TF_VERSION
+    value: "1.7.5"
+  - name: TF_BACKEND_RG
+    value: "rg-terraform-state"
+  - name: TF_BACKEND_SA
+    value: "sttfstate"
+  - name: TF_BACKEND_CONTAINER
+    value: "tfstate"
+
+stages:
+  # ---------------------------------------------------------------------------
+  # AKS
+  # ---------------------------------------------------------------------------
+  - stage: PlanProdAKS
+    displayName: "Plan · AKS"
+    jobs:
+      - template: templates/terraform-plan.yml
+        parameters:
+          tfVersion:          $(TF_VERSION)
+          tfWorkingDir:       terraform/prod/azure-aks-cluster
+          tfBackendRg:        $(TF_BACKEND_RG)
+          tfBackendSa:        $(TF_BACKEND_SA)
+          tfBackendContainer: $(TF_BACKEND_CONTAINER)
+          tfVarsFile:         terraform/prod/azure-aks-cluster/terraform.tfvars
+          artifactSuffix:     "-prod-aks"
+
+  - stage: ApplyProdAKS
+    displayName: "Apply · AKS"
+    dependsOn: PlanProdAKS
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - template: templates/terraform-apply.yml
+        parameters:
+          tfVersion:          $(TF_VERSION)
+          tfWorkingDir:       terraform/prod/azure-aks-cluster
+          tfBackendRg:        $(TF_BACKEND_RG)
+          tfBackendSa:        $(TF_BACKEND_SA)
+          tfBackendContainer: $(TF_BACKEND_CONTAINER)
+          artifactSuffix:     "-prod-aks"
+          environment:        "infrastructure-prod"   # Manual approval gate here
+
+  # ---------------------------------------------------------------------------
+  # Storage — plan parallel with AKS; apply waits for AKS apply + approval
+  # ---------------------------------------------------------------------------
+  - stage: PlanProdStorage
+    displayName: "Plan · Storage"
+    dependsOn: []
+    jobs:
+      - template: templates/terraform-plan.yml
+        parameters:
+          tfVersion:          $(TF_VERSION)
+          tfWorkingDir:       terraform/prod/azure-storage
+          tfBackendRg:        $(TF_BACKEND_RG)
+          tfBackendSa:        $(TF_BACKEND_SA)
+          tfBackendContainer: $(TF_BACKEND_CONTAINER)
+          tfVarsFile:         terraform/prod/azure-storage/terraform.tfvars
+          artifactSuffix:     "-prod-storage"
+
+  - stage: ApplyProdStorage
+    displayName: "Apply · Storage"
+    dependsOn:
+      - PlanProdStorage
+      - ApplyProdAKS
+    condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'), ne(variables['Build.Reason'], 'PullRequest'))
+    jobs:
+      - template: templates/terraform-apply.yml
+        parameters:
+          tfVersion:          $(TF_VERSION)
+          tfWorkingDir:       terraform/prod/azure-storage
+          tfBackendRg:        $(TF_BACKEND_RG)
+          tfBackendSa:        $(TF_BACKEND_SA)
+          tfBackendContainer: $(TF_BACKEND_CONTAINER)
+          artifactSuffix:     "-prod-storage"
+          environment:        "infrastructure-prod"   # Manual approval gate here

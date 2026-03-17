@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<databaseChangeLog
+    xmlns="http://www.liquibase.org/xml/ns/dbchangelog"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+    xsi:schemaLocation="
+        http://www.liquibase.org/xml/ns/dbchangelog
+        http://www.liquibase.org/xml/ns/dbchangelog/dbchangelog-4.27.xsd">
+
+    <!--
+      Example post-initial migration: adds created_by / updated_by audit
+      columns to customers and orders. Demonstrates addColumn + preconditions.
+    -->
+    <changeSet id="007-add-audit-columns-customers" author="kyle.schneiderlochner">
+        <comment>Add created_by and updated_by audit columns to customers.</comment>
+
+        <preConditions onFail="MARK_RAN">
+            <!-- Skip silently if columns already exist (safe re-run) -->
+            <not>
+                <columnExists tableName="customers" columnName="created_by"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="customers">
+            <column name="created_by" type="VARCHAR(100)" defaultValue="system">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="VARCHAR(100)" defaultValue="system">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+        <rollback>
+            <dropColumn tableName="customers" columnName="created_by"/>
+            <dropColumn tableName="customers" columnName="updated_by"/>
+        </rollback>
+    </changeSet>
+
+    <changeSet id="007-add-audit-columns-orders" author="kyle.schneiderlochner">
+        <comment>Add created_by and updated_by audit columns to orders.</comment>
+
+        <preConditions onFail="MARK_RAN">
+            <not>
+                <columnExists tableName="orders" columnName="created_by"/>
+            </not>
+        </preConditions>
+
+        <addColumn tableName="orders">
+            <column name="created_by" type="VARCHAR(100)" defaultValue="system">
+                <constraints nullable="false"/>
+            </column>
+            <column name="updated_by" type="VARCHAR(100)" defaultValue="system">
+                <constraints nullable="false"/>
+            </column>
+        </addColumn>
+
+        <rollback>
+            <dropColumn tableName="orders" columnName="created_by"/>
+            <dropColumn tableName="orders" columnName="updated_by"/>
+        </rollback>
+    </changeSet>
+
+</databaseChangeLog>

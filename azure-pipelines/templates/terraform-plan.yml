@@ -1,0 +1,93 @@
+###############################################################################
+# templates/terraform-plan.yml
+# Stage: Terraform init → validate → plan, publishes plan artifact
+###############################################################################
+parameters:
+  - name: tfVersion
+    type: string
+    default: "1.7.5"
+  - name: tfWorkingDir
+    type: string
+  - name: artifactSuffix
+    type: string
+    default: ""   # e.g. "-nonprod-aks" — disambiguates artifacts when multiple envs run in one pipeline
+  - name: tfBackendRg
+    type: string
+  - name: tfBackendSa
+    type: string
+  - name: tfBackendContainer
+    type: string
+  - name: tfVarsFile
+    type: string
+    default: "env/prod.tfvars"
+  - name: serviceConnection
+    type: string
+    default: "Azure-ServiceConnection"
+
+jobs:
+  - job: TerraformPlan
+    displayName: "Init · Validate · Plan"
+    pool:
+      vmImage: "ubuntu-latest"
+    steps:
+      - task: TerraformInstaller@1
+        displayName: "Install Terraform ${{ parameters.tfVersion }}"
+        inputs:
+          terraformVersion: ${{ parameters.tfVersion }}
+
+      - task: TerraformTaskV4@4
+        displayName: "Terraform Init"
+        inputs:
+          provider: azurerm
+          command: init
+          workingDirectory: ${{ parameters.tfWorkingDir }}
+          backendServiceArm: "${{ parameters.serviceConnection }}"
+          backendAzureRmResourceGroupName: ${{ parameters.tfBackendRg }}
+          backendAzureRmStorageAccountName: ${{ parameters.tfBackendSa }}
+          backendAzureRmContainerName: ${{ parameters.tfBackendContainer }}
+          backendAzureRmKey: "${{ parameters.tfWorkingDir }}.tfstate"
+
+      - task: TerraformTaskV4@4
+        displayName: "Terraform Validate"
+        inputs:
+          provider: azurerm
+          command: validate
+          workingDirectory: ${{ parameters.tfWorkingDir }}
+
+      - task: TerraformTaskV4@4
+        displayName: "Terraform Plan"
+        inputs:
+          provider: azurerm
+          command: plan
+          workingDirectory: ${{ parameters.tfWorkingDir }}
+          commandOptions: "-var-file=${{ parameters.tfVarsFile }} -out=tfplan -detailed-exitcode"
+          environmentServiceNameAzureRM: "${{ parameters.serviceConnection }}"
+        env:
+          ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+          ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+          ARM_TENANT_ID: $(ARM_TENANT_ID)
+          ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish plan artifact"
+        inputs:
+          targetPath: "${{ parameters.tfWorkingDir }}/tfplan"
+          artifact: "terraform-plan${{ parameters.artifactSuffix }}"
+          publishLocation: pipeline
+
+      - script: |
+          cd ${{ parameters.tfWorkingDir }}
+          terraform show -no-color tfplan | tee $(Build.ArtifactStagingDirectory)/plan.txt
+        displayName: "Show plan (human-readable)"
+        env:
+          ARM_CLIENT_ID: $(ARM_CLIENT_ID)
+          ARM_CLIENT_SECRET: $(ARM_CLIENT_SECRET)
+          ARM_TENANT_ID: $(ARM_TENANT_ID)
+          ARM_SUBSCRIPTION_ID: $(ARM_SUBSCRIPTION_ID)
+
+      - task: PublishPipelineArtifact@1
+        displayName: "Publish plan text"
+        inputs:
+          targetPath: "$(Build.ArtifactStagingDirectory)/plan.txt"
+          artifact: "terraform-plan-txt${{ parameters.artifactSuffix }}"
+          publishLocation: pipeline

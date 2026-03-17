@@ -1,0 +1,24 @@
+###############################################################################
+# Chart.yaml — Package Registry API Helm chart
+###############################################################################
+apiVersion: v2
+name: package-registry-api
+description: >
+  FastAPI-based package registry with Azure AI Search semantic search,
+  Azure AI Foundry (GPT-4o) RAG chat, and Key Vault secret injection
+  via AKS Workload Identity.
+
+type: application
+version: 1.0.0
+appVersion: "2.0.0"
+
+keywords:
+  - api
+  - fastapi
+  - azure
+  - ai-search
+  - workload-identity
+
+maintainers:
+  - name: Kyle Schneiderlochner
+    email: kyle.schne@gmail.com

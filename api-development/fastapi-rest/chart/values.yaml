@@ -1,0 +1,120 @@
+###############################################################################
+# values.yaml — default Helm values
+# Override per environment: helm upgrade --install ... -f values.prod.yaml
+###############################################################################
+
+replicaCount: 2
+
+image:
+  repository: myacr.azurecr.io/package-registry-api
+  pullPolicy: Always
+  tag: "latest"   # Overridden at deploy time: --set image.tag=<build-id>
+
+imagePullSecrets: []  # Not needed when using workload identity + AcrPull role
+
+nameOverride: ""
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Service Account — annotated with workload identity client ID
+# The client ID comes from Terraform output: fastapi_workload_identity_client_id
+# ---------------------------------------------------------------------------
+serviceAccount:
+  create: true
+  name: "fastapi-sa"
+  annotations:
+    azure.workload.identity/client-id: ""   # Set via --set or values.prod.yaml
+
+podLabels:
+  azure.workload.identity/use: "true"       # Required for workload identity token injection
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 8080
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+  hosts:
+    - host: api.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: "250m"
+    memory: 512Mi
+  limits:
+    cpu: "1000m"
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 70
+
+# ---------------------------------------------------------------------------
+# Application environment variables
+# Both KV URIs must be set — app loads secrets from each vault at startup.
+# ---------------------------------------------------------------------------
+env:
+  # Internal KV — Terraform-managed secrets (endpoints, config)
+  # Terraform output: keyvault_internal_uri
+  AZURE_KEYVAULT_INTERNAL_URI: ""   # e.g. https://kv-int-my-cluster.vault.azure.net/
+
+  # External KV — 3rd-party / pipeline-managed secrets (API keys, credentials)
+  # Terraform output: keyvault_external_uri
+  AZURE_KEYVAULT_EXTERNAL_URI: ""   # e.g. https://kv-ext-my-cluster.vault.azure.net/
+
+  # Environment name — used for feature flags, logging level, etc.
+  FAST_ENV: "dev"               # Override per environment: dev | staging | prod
+
+  # AAD tenant — required by DefaultAzureCredential in some auth flows
+  AZURE_TENANT_ID: ""           # Set via --set or values.prod.yaml
+
+  # Optional local overrides (ignored when both KV URIs are set)
+  OPENAI_DEPLOYMENT: "gpt-4o"
+  AI_SEARCH_INDEX: "packages-index"
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+livenessProbe:
+  httpGet:
+    path: /healthz/live
+    port: 8080
+  initialDelaySeconds: 15
+  periodSeconds: 20
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /healthz/ready
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3

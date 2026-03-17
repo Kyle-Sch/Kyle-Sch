@@ -1,0 +1,48 @@
+###############################################################################
+# values.prod.yaml — production overrides
+# Usage: helm upgrade --install package-registry-api ./chart \
+#          -f chart/values.yaml -f chart/values.prod.yaml \
+#          --set image.tag=$(Build.BuildId) \
+#          --set serviceAccount.annotations."azure\.workload\.identity/client-id"=$(TF_OUT_FASTAPI_WI_CLIENT_ID)
+###############################################################################
+
+replicaCount: 3
+
+image:
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "8m"
+  hosts:
+    - host: api.prod.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: api-prod-tls
+      hosts:
+        - api.prod.example.com
+
+resources:
+  requests:
+    cpu: "500m"
+    memory: 1Gi
+  limits:
+    cpu: "2000m"
+    memory: 2Gi
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 50
+
+env:
+  AZURE_KEYVAULT_INTERNAL_URI: "https://kv-int-REPLACE_WITH_CLUSTER_NAME.vault.azure.net/"
+  AZURE_KEYVAULT_EXTERNAL_URI: "https://kv-ext-REPLACE_WITH_CLUSTER_NAME.vault.azure.net/"
+  FAST_ENV: "prod"
+  AZURE_TENANT_ID: ""           # Set via --set env.AZURE_TENANT_ID=$(az account show --query tenantId -o tsv)
+  OPENAI_DEPLOYMENT: "gpt-4o"
+  AI_SEARCH_INDEX: "packages-index"

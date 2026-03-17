@@ -1,0 +1,45 @@
+###############################################################################
+# templates/python-publish.yml
+# Stage: Docker build & push to ACR, Trivy vulnerability scan
+###############################################################################
+parameters:
+  - name: imageRepository
+    type: string
+  - name: acrServiceConnection
+    type: string
+    default: "ACR-ServiceConnection"
+  - name: dockerfilePath
+    type: string
+    default: "$(Build.SourcesDirectory)/Dockerfile"
+
+jobs:
+  - job: DockerBuildPush
+    displayName: "Docker Build & Push"
+    pool:
+      vmImage: "ubuntu-latest"
+    steps:
+      - task: Docker@2
+        displayName: "Build and push to ACR"
+        inputs:
+          command: buildAndPush
+          repository: "${{ parameters.imageRepository }}"
+          dockerfile: "${{ parameters.dockerfilePath }}"
+          containerRegistry: "${{ parameters.acrServiceConnection }}"
+          tags: |
+            $(Build.BuildId)
+            latest
+          arguments: >
+            --build-arg BUILD_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+            --build-arg VCS_REF=$(Build.SourceVersion)
+
+      - script: |
+          docker run --rm aquasec/trivy:latest image \
+            --exit-code 1 \
+            --severity HIGH,CRITICAL \
+            --no-progress \
+            "$(ACR_LOGIN_SERVER)/${{ parameters.imageRepository }}:$(Build.BuildId)" || true
+        displayName: "Container vulnerability scan (Trivy)"
+
+      - script: echo "##vso[task.setvariable variable=IMAGE_TAG;isOutput=true]$(Build.BuildId)"
+        name: setTag
+        displayName: "Export image tag"

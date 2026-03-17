@@ -1,0 +1,31 @@
+###############################################################################
+# python-ci-pipeline.yml — Lint, type-check, and test only
+# Triggers on every push and PR to main. No Docker or AKS steps.
+###############################################################################
+
+trigger:
+  branches:
+    include:
+      - main
+      - release/*
+  paths:
+    exclude:
+      - docs/**
+      - "*.md"
+
+pr:
+  branches:
+    include:
+      - main
+
+variables:
+  - name: PYTHON_VERSION
+    value: "3.12"
+
+stages:
+  - stage: CI
+    displayName: "Lint & Test"
+    jobs:
+      - template: templates/python-ci.yml
+        parameters:
+          pythonVersion: $(PYTHON_VERSION)

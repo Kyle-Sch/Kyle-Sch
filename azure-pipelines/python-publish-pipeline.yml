@@ -1,0 +1,28 @@
+###############################################################################
+# python-publish-pipeline.yml — Docker build, Trivy scan, push to ACR
+# Runs on main branch merges only — never on PRs.
+###############################################################################
+
+trigger:
+  branches:
+    include:
+      - main
+  paths:
+    exclude:
+      - docs/**
+      - "*.md"
+
+pr: none
+
+variables:
+  - group: acr-credentials   # ACR_LOGIN_SERVER, ACR_USERNAME, ACR_PASSWORD
+  - name: IMAGE_REPOSITORY
+    value: "myapp/worker"
+
+stages:
+  - stage: Publish
+    displayName: "Build & Push Docker Image"
+    jobs:
+      - template: templates/python-publish.yml
+        parameters:
+          imageRepository: $(IMAGE_REPOSITORY)

@@ -1,0 +1,32 @@
+###############################################################################
+# docker-compose.yml — local development
+#
+# Secrets are loaded from .env (copy .env.example → .env and fill in values).
+# Azure SDK will use DefaultAzureCredential which picks up `az login` locally.
+###############################################################################
+version: "3.9"
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: package-registry-api:local
+    container_name: package-registry-api
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      # Override to use local env vars instead of Key Vault during dev
+      AZURE_KEYVAULT_URI: "${AZURE_KEYVAULT_URI:-}"
+    volumes:
+      # Hot-reload in dev: mount source over the image copy
+      - ./app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/healthz/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
